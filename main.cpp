@@ -90,16 +90,16 @@ int main() {
         switch (key) {
             case 'f':
             threadManager.ToggleFPS();
-            break;
+            continue;
             case 'q':
             threadManager.StopThread();
             run = false;
-            break;
+            continue;
             case 'c':
             if (threadManager.GetFrame(frameData)) {
                 LogMessage(1, "Got frame");
             }
-            break;
+            continue;
             return 0;
         }
     }
