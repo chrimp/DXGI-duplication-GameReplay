@@ -14,9 +14,12 @@ void ThreadManager::StartThread() {
 }
 
 void ThreadManager::StopThread() {
-    m_Run = false;
-    m_CV.notify_all();
-    m_Thread.join();
+    if (m_Run) {
+        m_Run = false;
+        m_CV.notify_all();
+        m_Thread.join();
+
+    }
 }
 
 void ThreadManager::ToggleFPS() {
