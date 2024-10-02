@@ -21,6 +21,7 @@ void ThreadManager::StopThread() {
 
 void ThreadManager::ToggleFPS() {
     m_FPSEnabled = !m_FPSEnabled;
+    return;
 }
 
 _Success_(return)
@@ -72,15 +73,15 @@ void ThreadManager::DuplicationLoop() {
 
             m_DuplicationManager.DoneWithFrame();
             m_CV.notify_one();
+        }
 
-            if (m_FPSEnabled) {
-                std::chrono::time_point<std::chrono::high_resolution_clock> now = std::chrono::high_resolution_clock::now();
-                std::chrono::duration<double> elapsed = now - lastTime;
-                if (elapsed.count() >= 1.0) {
-                    lastTime = now;
-                    printf("FPS: %d\n", frameCount);
-                    frameCount = 0;
-                }
+        if (m_FPSEnabled) {
+            std::chrono::time_point<std::chrono::high_resolution_clock> now = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> elapsed = now - lastTime;
+            if (elapsed.count() >= 1.0) {
+                lastTime = now;
+                printf("FPS: %d\n", frameCount);
+                frameCount = 0;
             }
         }
     }
