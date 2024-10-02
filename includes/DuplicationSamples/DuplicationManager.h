@@ -23,6 +23,7 @@ public:
     DUPL_RETURN InitDupl(_In_ ID3D11Device* Device, UINT Output);
     DUPL_RETURN GetMouse(_Inout_ PTR_INFO* PtrInfo, _In_ DXGI_OUTDUPL_FRAME_INFO* FrameInfo, INT OffsetX, INT OffsetY);
     void GetOutputDesc(_Out_ DXGI_OUTPUT_DESC* DescPtr);
+    ID3D11Device* GetDevice() { return m_Device; }
 
 private:
 

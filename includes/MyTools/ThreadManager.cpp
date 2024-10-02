@@ -23,25 +23,53 @@ void ThreadManager::ToggleFPS() {
     m_FPSEnabled = !m_FPSEnabled;
 }
 
-_FRAME_DATA ThreadManager::GetFrame() {
+_Success_(return)
+bool ThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
     std::unique_lock<std::mutex> lock(m_Mutex);
     m_CV.wait(lock, [this] { return !m_FrameQueue.empty(); });
-    _FRAME_DATA data = m_FrameQueue.front();
-    m_FrameQueue.pop();
-    return data;
+    if (!m_FrameQueue.empty()) {
+        data = std::move(m_FrameQueue.front());
+        m_FrameQueue.pop();
+        return true;
+    }
+    return false;
 }
 
 void ThreadManager::DuplicationLoop() {
     int frameCount = 0;
+    ID3D11DeviceContext* deviceContext;
+    m_DuplicationManager.GetDevice()->GetImmediateContext(&deviceContext);
+
     std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
     while (m_Run) {
         _FRAME_DATA data;
         bool timeout;
         DUPL_RETURN ret = m_DuplicationManager.GetFrame(&data, &timeout);
         if (ret == DUPL_RETURN_SUCCESS && !timeout) {
-            frameCount++;
-            std::unique_lock<std::mutex> lock(m_Mutex);
-            m_FrameQueue.push(data);
+            frameCount++;            
+            D3D11_TEXTURE2D_DESC desc;
+            data.Frame->GetDesc(&desc);
+
+            D3D11_MAPPED_SUBRESOURCE mappedResource;
+            HRESULT hr = deviceContext->Map(data.Frame, 0, D3D11_MAP_READ, 0, &mappedResource);
+
+            if (SUCCEEDED(hr)) {
+                uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
+                std::vector<uint8_t> frameBuffer(desc.Width * desc.Height * 4);
+
+                for (UINT y = 0; y < desc.Height; y++) {
+                    memcpy(&frameBuffer[y * desc.Width * 4], src + y * mappedResource.RowPitch, desc.Width * 4);
+                }
+
+                {
+                    std::unique_lock<std::mutex> lock(m_Mutex);
+                    m_FrameQueue.push(frameBuffer);
+                    m_CV.notify_one();
+                }
+
+                deviceContext->Unmap(data.Frame, 0);
+            }
+
             m_DuplicationManager.DoneWithFrame();
             m_CV.notify_one();
 

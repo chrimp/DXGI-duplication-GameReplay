@@ -1,3 +1,6 @@
+#ifndef THREADMANAGER_HPP
+#define THREADMANAGER_HPP
+
 #include <thread>
 #include <mutex>
 #include <atomic>
@@ -14,10 +17,11 @@ class ThreadManager {
 	void StartThread();
 	void StopThread();
 	void ToggleFPS();
-	_FRAME_DATA GetFrame();
+    _Success_(return)
+    bool GetFrame(_Out_ std::vector<uint8_t>& data);
 
 	private:
-	std::queue<_FRAME_DATA> m_FrameQueue;
+	std::queue<std::vector<uint8_t>> m_FrameQueue;
 	std::thread m_Thread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
@@ -26,3 +30,5 @@ class ThreadManager {
 	DUPLICATIONMANAGER m_DuplicationManager;
 	void DuplicationLoop();
 };
+
+#endif

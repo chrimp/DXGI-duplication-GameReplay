@@ -317,3 +317,61 @@ void DUPLICATIONMANAGER::GetOutputDesc(_Out_ DXGI_OUTPUT_DESC* DescPtr)
 {
     *DescPtr = m_OutputDesc;
 }
+
+_Post_satisfies_(return != DUPL_RETURN_SUCCESS)
+DUPL_RETURN ProcessFailure(_In_opt_ ID3D11Device* Device, _In_ LPCWSTR Str, _In_ LPCWSTR Title, HRESULT hr, _In_opt_z_ HRESULT* ExpectedErrors)
+{
+    HRESULT TranslatedHr;
+
+    // On an error check if the DX device is lost
+    if (Device)
+    {
+        HRESULT DeviceRemovedReason = Device->GetDeviceRemovedReason();
+
+        switch (DeviceRemovedReason)
+        {
+            case DXGI_ERROR_DEVICE_REMOVED :
+            case DXGI_ERROR_DEVICE_RESET :
+            case static_cast<HRESULT>(E_OUTOFMEMORY) :
+            {
+                // Our device has been stopped due to an external event on the GPU so map them all to
+                // device removed and continue processing the condition
+                TranslatedHr = DXGI_ERROR_DEVICE_REMOVED;
+                break;
+            }
+
+            case S_OK :
+            {
+                // Device is not removed so use original error
+                TranslatedHr = hr;
+                break;
+            }
+
+            default :
+            {
+                // Device is removed but not a error we want to remap
+                TranslatedHr = DeviceRemovedReason;
+            }
+        }
+    }
+    else
+    {
+        TranslatedHr = hr;
+    }
+
+    // Check if this error was expected or not
+    if (ExpectedErrors)
+    {
+        HRESULT* CurrentResult = ExpectedErrors;
+
+        while (*CurrentResult != S_OK)
+        {
+            if (*(CurrentResult++) == TranslatedHr)
+            {
+                return DUPL_RETURN_ERROR_EXPECTED;
+            }
+        }
+    }
+
+    return DUPL_RETURN_ERROR_UNEXPECTED;
+}
