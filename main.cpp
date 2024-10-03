@@ -1,7 +1,8 @@
-#include <iostream>
-#include <format>
 #include <conio.h>
+
 #include "./includes/MyTools/ThreadManager.hpp"
+#include "./includes/MyTools/LogMessage.hpp"
+#include "./includes/MyTools/RawInputCapture.hpp"
 
 #pragma comment(lib,"d3d11.lib")
 
@@ -34,27 +35,9 @@ HRESULT EnumOutputsExpectedErrors[] = {
                                           S_OK                                    // Terminate list with zero valued HRESULT
 };
 
-template<typename... Args>
-void LogMessage(int level, const std::string& message, Args&&... args) {
-    auto formattedMessage = std::vformat(message, std::make_format_args(std::forward<Args>(args)...));
+CaptureThreadManager* threadManager = nullptr;
 
-    switch (level) {
-    case 0:
-        std::cout << "[DEBUG]: " << formattedMessage << std::endl;
-        break;
-    case 1:
-        std::cout << "[INFO]: " << formattedMessage << std::endl;
-        break;
-    case 2:
-        std::cout << "\033[0;93m[WARNING]: " << formattedMessage << "\033[0m" << std::endl;
-        break;
-    case 3:
-        std::cout << "\033[0;01m[ERROR]: " << formattedMessage << "\033[0m" << std::endl;
-        break;
-    }
-
-    return;
-}
+void CallThreadForSave();
 
 int main() {
     ID3D11Device* device;
@@ -73,30 +56,32 @@ int main() {
     &featureLevel,
     &context);
 
-    DUPLICATIONMANAGER duplMgr;
-    if (duplMgr.InitDupl(device, 0) != DUPL_RETURN_SUCCESS) {
+    DUPLICATIONMANAGER* duplMgr = new DUPLICATIONMANAGER();
+    if (duplMgr->InitDupl(device, 0) != DUPL_RETURN_SUCCESS) {
         LogMessage(3, "Failed to initialize duplication manager");
         return -1;
     }
-
+    
     bool run = true;
     std::vector<uint8_t> frameData;
 
-    ThreadManager threadManager(duplMgr);
-    threadManager.StartThread();
+    threadManager = new CaptureThreadManager(*duplMgr);
+    threadManager->StartThread();
+    RegisterEnterCallback(CallThreadForSave);
+    StartMessageLoop();
 
     while (run) {
         char key = _getch();
         switch (key) {
             case 'f':
-            threadManager.ToggleFPS();
+            threadManager->ToggleFPS();
             continue;
             case 'q':
-            threadManager.StopThread();
+            threadManager->StopThread();
             run = false;
             continue;
             case 'c':
-            if (threadManager.GetFrame(frameData)) {
+            if (threadManager->GetFrame(frameData)) {
                 LogMessage(1, "Got frame");
             }
             continue;
@@ -104,6 +89,21 @@ int main() {
         }
     }
 
+    StopMessageLoop();
+
     device->Release();
     context->Release();
+
+	//delete duplMgr;
+}
+
+void CallThreadForSave() {
+    bool abort = (threadManager == nullptr || !threadManager->m_Run);
+
+    if (abort) {
+        LogMessage(3, "CallThreadForSave is with illegal ThreadManager");
+        return;
+    }
+
+    threadManager->SaveFrame();
 }
