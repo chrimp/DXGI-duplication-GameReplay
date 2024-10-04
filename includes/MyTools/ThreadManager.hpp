@@ -25,12 +25,15 @@ class CaptureThreadManager {
 	std::atomic<bool> m_Run;
 
 	private:
+	unsigned long m_FrameCount = 0;
 	std::queue<ComPtr<ID3D11Texture2D>> m_FrameQueue;
 	std::thread m_Thread;
+	std::thread m_SaveThread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
 	std::atomic<bool> m_FPSEnabled = true;
 	DUPLICATIONMANAGER m_DuplicationManager;
+	ComPtr<ID3D11DeviceContext> m_DeviceContext;
 	void DuplicationLoop();
 };
 

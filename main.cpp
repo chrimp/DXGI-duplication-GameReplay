@@ -1,4 +1,5 @@
 #include <conio.h>
+#include <filesystem>
 
 #include "./includes/MyTools/ThreadManager.hpp"
 #include "./includes/MyTools/LogMessage.hpp"
@@ -40,6 +41,19 @@ CaptureThreadManager* threadManager = nullptr;
 void CallThreadForSave();
 
 int main() {
+    std::filesystem::path here = "./";
+    try {
+        for (const auto& entry: std::filesystem::directory_iterator(here)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+                std::filesystem::remove(entry.path());
+            }
+        }
+    } catch (std::filesystem::filesystem_error& e) {
+        LogMessage(3, "Error: %s", e.what());
+    } catch (std::exception& e) {
+        LogMessage(3, "Error: %s", e.what());
+    }
+
     ID3D11Device* device;
     ID3D11DeviceContext* context;
     IDXGIOutputDuplication* deskDupl;
@@ -67,8 +81,8 @@ int main() {
 
     threadManager = new CaptureThreadManager(*duplMgr);
     threadManager->StartThread();
-    RegisterEnterCallback(CallThreadForSave);
-    StartMessageLoop();
+    //RegisterEnterCallback(CallThreadForSave);
+    //StartMessageLoop();
 
     while (run) {
         char key = _getch();
@@ -89,7 +103,7 @@ int main() {
         }
     }
 
-    StopMessageLoop();
+    //StopMessageLoop();
 
     device->Release();
     context->Release();
