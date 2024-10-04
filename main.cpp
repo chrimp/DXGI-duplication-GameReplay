@@ -98,7 +98,7 @@ int main() {
 }
 
 void CallThreadForSave() {
-    return;
+    //return;
     bool abort = (threadManager == nullptr || !threadManager->m_Run);
 
     if (abort) {

@@ -51,6 +51,30 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
     std::unique_lock<std::mutex> lock(m_Mutex);
     m_CV.wait(lock, [this] { return !m_FrameQueue.empty(); });
     if (!m_FrameQueue.empty()) {
+        D3D11_MAPPED_SUBRESOURCE mappedResource;
+        D3D11_TEXTURE2D_DESC desc;
+        ComPtr<ID3D11DeviceContext> deviceContext;
+        m_DuplicationManager.GetDevice()->GetImmediateContext(&deviceContext);
+        ComPtr<ID3D11Texture2D> stagingTexture = m_FrameQueue.front();
+        stagingTexture->GetDesc(&desc);
+        
+        HRESULT hr = deviceContext->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+        if (FAILED(hr)) {
+            LogMessage(3, "Failed to Map: 0x%x", hr);
+            abort();
+        }
+
+        uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
+        std::vector<uint8_t> frameBuffer(desc.Width * desc.Height * 4);
+
+        for (UINT y = 0; y < desc.Height; y++) {
+            memcpy(&frameBuffer[y * desc.Width * 4], src + y * mappedResource.RowPitch, desc.Width * 4);
+        }
+
+        data = frameBuffer;
+        deviceContext->Unmap(stagingTexture.Get(), 0);
+        m_FrameQueue.pop();
+        
         //data = std::move(m_FrameQueue.back());
         return true;
     }
@@ -94,6 +118,7 @@ void CaptureThreadManager::DuplicationLoop() {
             deviceContext->CopyResource(stagingTexture.Get(), data.Frame);
 
             std::unique_lock<std::mutex> lock(m_Mutex);
+            if (m_FrameQueue.size() >= 200) m_FrameQueue.pop();
             m_FrameQueue.push(stagingTexture);
             m_CV.notify_one();
             lock.unlock();
