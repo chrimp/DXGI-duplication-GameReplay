@@ -15,6 +15,7 @@
 #include <new>
 #include <warning.h>
 #include <DirectXMath.h>
+#include <wrl/client.h>
 
 #define NUMVERTICES 6
 #define BPP         4
@@ -26,6 +27,8 @@ extern HRESULT CreateDuplicationExpectedErrors[];
 extern HRESULT FrameInfoExpectedErrors[];
 extern HRESULT AcquireFrameExpectedError[];
 extern HRESULT EnumOutputsExpectedErrors[];
+
+using Microsoft::WRL::ComPtr;
 
 typedef _Return_type_success_(return == DUPL_RETURN_SUCCESS) enum
 {

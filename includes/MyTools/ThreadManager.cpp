@@ -51,7 +51,7 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
     std::unique_lock<std::mutex> lock(m_Mutex);
     m_CV.wait(lock, [this] { return !m_FrameQueue.empty(); });
     if (!m_FrameQueue.empty()) {
-        data = std::move(m_FrameQueue.back());
+        //data = std::move(m_FrameQueue.back());
         return true;
     }
     return false;
@@ -62,7 +62,7 @@ void CaptureThreadManager::DuplicationLoop() {
     ID3D11DeviceContext* deviceContext;
     m_DuplicationManager.GetDevice()->GetImmediateContext(&deviceContext);
 
-    ID3D11Texture2D* stagingTexture = nullptr;
+    ComPtr<ID3D11Texture2D> stagingTexture = nullptr;
 
     std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
     while (m_Run) {
@@ -91,8 +91,13 @@ void CaptureThreadManager::DuplicationLoop() {
                 }
             }
 
-            deviceContext->CopyResource(stagingTexture, data.Frame);
+            deviceContext->CopyResource(stagingTexture.Get(), data.Frame);
 
+            std::unique_lock<std::mutex> lock(m_Mutex);
+            m_FrameQueue.push(stagingTexture);
+            m_CV.notify_one();
+            lock.unlock();
+            /*
             D3D11_MAPPED_SUBRESOURCE mappedResource;
             HRESULT hr = deviceContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &mappedResource);
 
@@ -117,6 +122,7 @@ void CaptureThreadManager::DuplicationLoop() {
                 LogMessage(3, "Failed to Map: 0x%x", hr);
                 abort();
             }
+            */
         }
         else if (timeout) continue;
         else {

@@ -25,7 +25,7 @@ class CaptureThreadManager {
 	std::atomic<bool> m_Run;
 
 	private:
-	std::queue<std::vector<uint8_t>> m_FrameQueue;
+	std::queue<ComPtr<ID3D11Texture2D>> m_FrameQueue;
 	std::thread m_Thread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
