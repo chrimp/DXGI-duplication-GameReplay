@@ -110,7 +110,7 @@ void CaptureThreadManager::DuplicationLoop() {
     m_DuplicationManager.GetDevice()->GetImmediateContext(&m_DeviceContext);
 
     ComPtr<ID3D11Texture2D> stagingTexture = nullptr;
-
+    std::chrono::duration<double> copyElapsed;
     std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
     while (m_Run) {
         _FRAME_DATA data;
@@ -138,8 +138,10 @@ void CaptureThreadManager::DuplicationLoop() {
                     abort();
                 }
             }
-
+            std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
             m_DeviceContext->CopyResource(stagingTexture.Get(), data.Frame);
+            std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
+            copyElapsed += copyEnd - copyStart;
             m_DuplicationManager.DoneWithFrame();
             {
                 std::unique_lock<std::mutex> lock(m_Mutex);
@@ -161,8 +163,10 @@ void CaptureThreadManager::DuplicationLoop() {
             std::chrono::duration<double> elapsed = now - lastTime;
             if (elapsed.count() >= 1.0) {
                 lastTime = now;
-                printf("FPS: %d\n", frameCount);
+                printf("\rFPS: %d | Copy waits: %f", frameCount, copyElapsed.count());
+                fflush(stdout); // Ensure the output is immediately written to the console
                 frameCount = 0;
+                copyElapsed = std::chrono::duration<double>::zero();
             }
         }
     }
