@@ -213,7 +213,8 @@ void CaptureThreadManager::DuplicationLoop() {
             m_D2DDeviceContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
             m_D2DDeviceContext->DrawBitmap(d2dFrameBitmap.Get(), nullptr, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr);
             m_D2DDeviceContext->EndDraw();
-            m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
+            HRESULT hr = m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
+            if (hr == S_OK) m_FrameCount++;
 
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
@@ -224,7 +225,6 @@ void CaptureThreadManager::DuplicationLoop() {
                 m_FrameQueue.push(std::move(stagingTexture));
             }
             m_CV.notify_one();
-            m_FrameCount++;
         }
         else if (timeout) continue;
         else { abort(); }
