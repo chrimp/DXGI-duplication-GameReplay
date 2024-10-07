@@ -1,7 +1,45 @@
 #include "ThreadManager.hpp"
 
-CaptureThreadManager::CaptureThreadManager(DUPLICATIONMANAGER& duplMgr) : m_Run(false) {
-    m_DuplicationManager = duplMgr;
+void throwIfFailed(HRESULT hr) {
+    if (FAILED(hr)) abort();
+}
+
+CaptureThreadManager::CaptureThreadManager(HWND hWnd) : m_Run(false), m_hWnd(hWnd) {
+    UINT flag = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    #ifdef _DEBUG
+    flag |= D3D11_CREATE_DEVICE_DEBUG;
+    #endif
+
+    DXGI_SWAP_CHAIN_DESC scDesc = {};
+    scDesc.BufferCount = 2;
+    scDesc.BufferDesc.Width = 2560;
+    scDesc.BufferDesc.Height = 1440;
+    scDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scDesc.OutputWindow = m_hWnd;
+    scDesc.SampleDesc.Count = 1;
+    scDesc.Windowed = TRUE;
+    scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+
+    throwIfFailed(D3D11CreateDeviceAndSwapChain(
+        nullptr,
+        D3D_DRIVER_TYPE_HARDWARE,
+        nullptr, flag, nullptr, 0,
+        D3D11_SDK_VERSION,
+        &scDesc,
+        m_swapChain.GetAddressOf(),
+        m_Device.GetAddressOf(),
+        nullptr,
+        m_DeviceContext.GetAddressOf()
+    ));
+
+    throwIfFailed(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(m_D2DFactory.GetAddressOf())));
+    ComPtr<IDXGIDevice> dxgiDevice;
+    throwIfFailed(m_Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)));
+    ComPtr<ID2D1Device> d2dDevice;
+    throwIfFailed(m_D2DFactory->CreateDevice(dxgiDevice.Get(), d2dDevice.GetAddressOf()));
+    throwIfFailed(d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, m_D2DDeviceContext.GetAddressOf()));
+	m_DuplicationManager.InitDupl(m_Device.Get(), 0);
 }
 
 CaptureThreadManager::~CaptureThreadManager() {
@@ -11,7 +49,7 @@ CaptureThreadManager::~CaptureThreadManager() {
 void CaptureThreadManager::StartThread() {
     m_Run = true;
     m_Thread = std::thread(&CaptureThreadManager::DuplicationLoop, this);
-    m_SaveThread = std::thread(&CaptureThreadManager::SaveFrame, this);
+    //m_SaveThread = std::thread(&CaptureThreadManager::SaveFrame, this);
 }
 
 void CaptureThreadManager::StopThread() {
@@ -19,7 +57,7 @@ void CaptureThreadManager::StopThread() {
         m_Run = false;
         m_CV.notify_all();
         m_Thread.join();
-        m_SaveThread.join();
+        //m_SaveThread.join();
     }
 }
 
@@ -79,15 +117,6 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
             LogMessage(3, "Failed to Map: 0x%x", hr);
             abort();
         }
-#if FALSE
-        if (mappedResource.RowPitch >= 10240) {
-            LogMessage(3, "Frame %d has invalid RowPitch: %d", count, mappedResource.RowPitch);
-            LogMessage(3, "Its stagingTexture has %dx%d, %d(should be 87), %d", desc.Width, desc.Height, desc.Format, desc.ArraySize);
-			//m_DeviceContext->Unmap(stagingTexture.Get(), 0);
-            stagingTexture.Reset();
-            return false;
-        }
-#endif
         uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
         std::vector<uint8_t> frameBuffer(desc.Width * desc.Height * 4);
 
@@ -97,8 +126,6 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
 
         data = frameBuffer;
         m_DeviceContext->Unmap(stagingTexture.Get(), 0);
-        //stagingTexture->Release();
-        //data = std::move(m_FrameQueue.back());
         return true;
     }
     return false;
@@ -108,6 +135,40 @@ void CaptureThreadManager::DuplicationLoop() {
     int frameCount = 0;
     ID3D11DeviceContext* deviceContext;
     m_DuplicationManager.GetDevice()->GetImmediateContext(&m_DeviceContext);
+
+    ComPtr<ID3D11Texture2D> backBuffer;
+    m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
+    ComPtr<IDXGISurface> dxgiBackBufferSurface;
+    backBuffer->QueryInterface(IID_PPV_ARGS(&dxgiBackBufferSurface)); // This is backbuffer, do not touch it, set as draw target
+    ComPtr<IDXGISurface> dxgiFrameSurface; // Where the frame goes
+
+    D2D1_BITMAP_PROPERTIES1 bitmapProperties = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+    );
+
+    D2D1_RENDER_TARGET_PROPERTIES renderTargetProps = D2D1::RenderTargetProperties(
+    D2D1_RENDER_TARGET_TYPE_DEFAULT,
+    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)
+    );
+
+    D2D1_BITMAP_PROPERTIES1 renderTargetBitmapProps = D2D1::BitmapProperties1(
+        D2D1_BITMAP_OPTIONS_TARGET,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+    );
+
+    ComPtr<ID2D1RenderTarget> d2dRenderTarget;
+    throwIfFailed(m_D2DFactory->CreateDxgiSurfaceRenderTarget(
+        dxgiBackBufferSurface.Get(), &renderTargetProps, d2dRenderTarget.GetAddressOf()
+    ));
+    ComPtr<ID2D1Bitmap1> backBufferBitmap;
+    throwIfFailed(m_D2DDeviceContext->CreateBitmapFromDxgiSurface(
+        dxgiBackBufferSurface.Get(),
+        NULL, &backBufferBitmap
+    ));
+    m_D2DDeviceContext->SetTarget(backBufferBitmap.Get());
+
+    ComPtr<ID2D1Bitmap1> d2dFrameBitmap;
 
     ComPtr<ID3D11Texture2D> stagingTexture = nullptr;
     std::chrono::duration<double> copyElapsed;
@@ -140,6 +201,19 @@ void CaptureThreadManager::DuplicationLoop() {
             }
             std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
             m_DeviceContext->CopyResource(stagingTexture.Get(), data.Frame);
+            data.Frame->QueryInterface(IID_PPV_ARGS(dxgiFrameSurface.GetAddressOf()));
+
+            m_D2DDeviceContext->CreateBitmapFromDxgiSurface(
+                dxgiFrameSurface.Get(),
+                &bitmapProperties,
+                d2dFrameBitmap.GetAddressOf()
+            );
+            m_D2DDeviceContext->BeginDraw();
+            m_D2DDeviceContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+            m_D2DDeviceContext->DrawBitmap(d2dFrameBitmap.Get(), nullptr, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr);
+            m_D2DDeviceContext->EndDraw();
+            m_swapChain->Present(0, 0);
+
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
             m_DuplicationManager.DoneWithFrame();
@@ -152,10 +226,6 @@ void CaptureThreadManager::DuplicationLoop() {
             m_FrameCount++;
         }
         else if (timeout) continue;
-        else if (ret == DUPL_RETURN_ERROR_EXPECTED) {
-			LogMessage(2, "Failed to get frame: %x", ret);
-            continue;
-        }
         else { abort(); }
 
         if (m_FPSEnabled) {

@@ -6,6 +6,10 @@
 #include "./includes/MyTools/RawInputCapture.hpp"
 
 #pragma comment(lib,"d3d11.lib")
+#pragma comment(lib,"dxgi.lib")
+#pragma comment(lib, "d2d1.lib")
+
+using namespace DirectX;
 
 HRESULT SystemTransitionsExpectedErrors[] = {
                                                 DXGI_ERROR_DEVICE_REMOVED,
@@ -36,11 +40,63 @@ HRESULT EnumOutputsExpectedErrors[] = {
                                           S_OK                                    // Terminate list with zero valued HRESULT
 };
 
-CaptureThreadManager* threadManager = nullptr;
+std::unique_ptr<CaptureThreadManager> threadManager;
+ComPtr<ID3D11DeviceContext> context;
+ComPtr<ID3D11Texture2D> texture;
+HWND hWnd;
 
 void CallThreadForSave();
 
-int main() {
+void CallThreadForSave() {
+    //return;
+    bool abort = (threadManager == nullptr || !threadManager->m_Run);
+
+    if (abort) {
+        LogMessage(3, "CallThreadForSave is with illegal ThreadManager");
+        return;
+    }
+
+    threadManager->SaveFrame();
+}
+
+// Here for creating a new window to draw frames
+
+LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            break;
+        default:
+            return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+
+HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
+    WNDCLASS wc = { 0 };
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"DDAPIWindowClass";
+
+    RegisterClass(&wc);
+
+    HWND hWnd = CreateWindowEx(
+        0,
+        wc.lpszClassName,
+        L"DDAPI Frame Preview",
+        WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        1920, 1080,
+        NULL, NULL, hInstance, NULL);
+    
+    if (hWnd) {
+        ShowWindow(hWnd, nCmdShow);
+    }
+
+    return hWnd;
+}
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     std::filesystem::path here = "./";
     try {
         for (const auto& entry: std::filesystem::directory_iterator(here)) {
@@ -53,72 +109,16 @@ int main() {
     } catch (std::exception& e) {
         LogMessage(3, "Error: %s", e.what());
     }
+    hWnd = CreateWindowInstance(hInstance, nCmdShow);
+    threadManager = std::make_unique<CaptureThreadManager>(hWnd);
 
-    ID3D11Device* device;
-    ID3D11DeviceContext* context;
-    IDXGIOutputDuplication* deskDupl;
-
-    D3D_FEATURE_LEVEL featureLevel;
-    D3D11CreateDevice(nullptr,
-    D3D_DRIVER_TYPE_HARDWARE,
-    nullptr,
-    0,
-    nullptr,
-    0,
-    D3D11_SDK_VERSION,
-    &device,
-    &featureLevel,
-    &context);
-
-    DUPLICATIONMANAGER* duplMgr = new DUPLICATIONMANAGER();
-    if (duplMgr->InitDupl(device, 0) != DUPL_RETURN_SUCCESS) {
-        LogMessage(3, "Failed to initialize duplication manager");
-        return -1;
-    }
-    
-    bool run = true;
-    std::vector<uint8_t> frameData;
-
-    threadManager = new CaptureThreadManager(*duplMgr);
     threadManager->StartThread();
-    //RegisterEnterCallback(CallThreadForSave);
-    //StartMessageLoop();
-
-    while (run) {
-        char key = _getch();
-        switch (key) {
-            case 'f':
-            threadManager->ToggleFPS();
-            continue;
-            case 'q':
-            threadManager->StopThread();
-            run = false;
-            continue;
-            case 'c':
-            if (threadManager->GetFrame(frameData)) {
-                LogMessage(1, "Got frame");
-            }
-            continue;
-            return 0;
+    MSG msg = {};
+    while (WM_QUIT != msg.message) {
+        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
         }
     }
-
-    //StopMessageLoop();
-
-    device->Release();
-    context->Release();
-
-	//delete duplMgr;
-}
-
-void CallThreadForSave() {
-    //return;
-    bool abort = (threadManager == nullptr || !threadManager->m_Run);
-
-    if (abort) {
-        LogMessage(3, "CallThreadForSave is with illegal ThreadManager");
-        return;
-    }
-
-    threadManager->SaveFrame();
+    return 0;
 }
