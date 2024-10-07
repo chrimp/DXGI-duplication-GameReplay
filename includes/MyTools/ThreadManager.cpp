@@ -34,8 +34,9 @@ CaptureThreadManager::CaptureThreadManager(HWND hWnd) : m_Run(false), m_hWnd(hWn
     ));
 
     throwIfFailed(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(m_D2DFactory.GetAddressOf())));
-    ComPtr<IDXGIDevice> dxgiDevice;
+    ComPtr<IDXGIDevice1> dxgiDevice;
     throwIfFailed(m_Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)));
+    dxgiDevice->SetMaximumFrameLatency(1);
     ComPtr<ID2D1Device> d2dDevice;
     throwIfFailed(m_D2DFactory->CreateDevice(dxgiDevice.Get(), d2dDevice.GetAddressOf()));
     throwIfFailed(d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, m_D2DDeviceContext.GetAddressOf()));
@@ -200,7 +201,7 @@ void CaptureThreadManager::DuplicationLoop() {
                 }
             }
             std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
-            m_DeviceContext->CopyResource(stagingTexture.Get(), data.Frame);
+            //m_DeviceContext->CopyResource(stagingTexture.Get(), data.Frame);
             data.Frame->QueryInterface(IID_PPV_ARGS(dxgiFrameSurface.GetAddressOf()));
 
             m_D2DDeviceContext->CreateBitmapFromDxgiSurface(
@@ -212,7 +213,7 @@ void CaptureThreadManager::DuplicationLoop() {
             m_D2DDeviceContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
             m_D2DDeviceContext->DrawBitmap(d2dFrameBitmap.Get(), nullptr, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr);
             m_D2DDeviceContext->EndDraw();
-            m_swapChain->Present(0, 0);
+            m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
 
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;

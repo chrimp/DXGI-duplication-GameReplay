@@ -109,6 +109,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     } catch (std::exception& e) {
         LogMessage(3, "Error: %s", e.what());
     }
+
+    AllocConsole();
+    FILE* pCout;
+    freopen_s(&pCout, "CONOUT$", "w", stdout);
+    std::cout << "Console is ready" << std::endl;
+
     hWnd = CreateWindowInstance(hInstance, nCmdShow);
     threadManager = std::make_unique<CaptureThreadManager>(hWnd);
 
@@ -120,5 +126,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
             DispatchMessage(&msg);
         }
     }
+
+	threadManager->StopThread();
+
+    if (pCout) {
+        fclose(pCout);
+    }
+    FreeConsole();
     return 0;
 }
