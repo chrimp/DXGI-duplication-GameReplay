@@ -1,30 +1,122 @@
 #include "ThreadManager.hpp"
+#include "../wil/resource.h"
 
 void throwIfFailed(HRESULT hr) {
-    if (FAILED(hr)) abort();
+    std::stringstream ss;
+    ss << std::hex << hr;
+    std::string hex = ss.str();
+    if (FAILED(hr) || hr == S_FALSE) _CrtDbgBreak();
+}
+
+void CaptureThreadManager::CreateShader() {
+    const char* vsSrc =
+        "struct VSInput { float3 position : POSITION; float2 texcoord : TEXCOORD0; };"
+        "struct PSInput { float4 position : SV_POSITION; float2 texcoord : TEXCOORD0; };"
+        "PSInput main(VSInput input) {"
+        "    PSInput output;"
+        "    output.position = float4(input.position, 1.0);"
+        "    output.texcoord = input.texcoord;"
+        "    return output;"
+        "}";
+
+    const char* psSrc =
+        "struct PSInput { float4 position : SV_POSITION; float2 texcoord : TEXCOORD0; };"
+        "Texture2D tex : register(t0);"
+        "SamplerState samplerState : register(s0);"
+        "float4 main(PSInput input) : SV_Target {"
+        "    return tex.Sample(samplerState, input.texcoord);"
+        "}";
+    UINT compileFlags = 0; //D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
+    ComPtr<ID3DBlob> vsBlob, psBlob, errorBlob;
+    HRESULT hr = D3DCompile(vsSrc, strlen(vsSrc), nullptr, nullptr, nullptr, "main", "vs_5_0", compileFlags, 0, &vsBlob, &errorBlob);
+    if (FAILED(hr)) {
+        if (errorBlob) {
+			char* error = static_cast<char*>(errorBlob->GetBufferPointer());
+			LogMessage(3, "Error compiling vertex shader: %s", error);
+			errorBlob->Release();
+        }
+        _CrtDbgBreak();
+    }
+    hr = D3DCompile(psSrc, strlen(psSrc), nullptr, nullptr, nullptr, "main", "ps_5_0", compileFlags, 0, &psBlob, &errorBlob);
+    if (FAILED(hr)) {
+        if (errorBlob) {
+            char* error = static_cast<char*>(errorBlob->GetBufferPointer());
+            LogMessage(3, "Error compiling vertex shader: %s", error);
+            errorBlob->Release();
+        }
+        _CrtDbgBreak();
+    }
+    throwIfFailed(m_Device->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, m_VertexShader.ReleaseAndGetAddressOf()));
+    throwIfFailed(m_Device->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, m_PixelShader.ReleaseAndGetAddressOf()));
+
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 }
+    };
+
+    throwIfFailed(m_Device->CreateInputLayout(layout, ARRAYSIZE(layout), vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), m_InputLayout.ReleaseAndGetAddressOf()));
+    m_DeviceContext->IASetInputLayout(m_InputLayout.Get());
+
+    return;
+}
+
+void CaptureThreadManager::CreateQuad() {
+    struct Vertex {
+        float position[3];
+        float texcoord[2];
+    };
+
+    Vertex quadVertices[] = {
+        { { -1.0f,  1.0f, 0.0f }, { 0.0f, 0.0f } },
+        { {  1.0f,  1.0f, 0.0f }, { 1.0f, 0.0f } },
+        { { -1.0f, -1.0f, 0.0f }, { 0.0f, 1.0f } },
+        { {  1.0f, -1.0f, 0.0f }, { 1.0f, 1.0f } },
+    };
+
+    D3D11_BUFFER_DESC bufferDesc = {};
+    bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    bufferDesc.ByteWidth = sizeof(quadVertices);
+    bufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+
+    D3D11_SUBRESOURCE_DATA initData = {};
+    initData.pSysMem = quadVertices;
+
+    throwIfFailed(m_Device->CreateBuffer(&bufferDesc, &initData, m_VertexBuffer.ReleaseAndGetAddressOf()));
+
+    UINT stride = sizeof(Vertex);
+    UINT offset = 0;
+    m_DeviceContext->IASetVertexBuffers(0, 1, m_VertexBuffer.GetAddressOf(), &stride, &offset);
+    m_DeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+
+    return;
 }
 
 CaptureThreadManager::CaptureThreadManager(HWND hWnd) : m_Run(false), m_hWnd(hWnd) {
-    UINT flag = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
+    m_ReplayDeque.clear();
+
+    UINT flag = 0;
     #ifdef _DEBUG
     flag |= D3D11_CREATE_DEVICE_DEBUG;
     #endif
 
     DXGI_SWAP_CHAIN_DESC scDesc = {};
-    scDesc.BufferCount = 2;
-    scDesc.BufferDesc.Width = 2560;
+    scDesc.BufferCount = 1;
+    scDesc.BufferDesc.Width = 692;
     scDesc.BufferDesc.Height = 1440;
     scDesc.BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    scDesc.OutputWindow = m_hWnd;
+    scDesc.OutputWindow = hWnd;
     scDesc.SampleDesc.Count = 1;
-    scDesc.Windowed = TRUE;
-    scDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	scDesc.SampleDesc.Quality = 0;
+	scDesc.Windowed = TRUE;
 
     throwIfFailed(D3D11CreateDeviceAndSwapChain(
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
-        nullptr, flag, nullptr, 0,
+        nullptr,
+        0,
+        nullptr,
+        0,
         D3D11_SDK_VERSION,
         &scDesc,
         m_swapChain.GetAddressOf(),
@@ -32,15 +124,54 @@ CaptureThreadManager::CaptureThreadManager(HWND hWnd) : m_Run(false), m_hWnd(hWn
         nullptr,
         m_DeviceContext.GetAddressOf()
     ));
-
-    throwIfFailed(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, IID_PPV_ARGS(m_D2DFactory.GetAddressOf())));
-    ComPtr<IDXGIDevice1> dxgiDevice;
-    throwIfFailed(m_Device->QueryInterface(IID_PPV_ARGS(&dxgiDevice)));
-    dxgiDevice->SetMaximumFrameLatency(1);
-    ComPtr<ID2D1Device> d2dDevice;
-    throwIfFailed(m_D2DFactory->CreateDevice(dxgiDevice.Get(), d2dDevice.GetAddressOf()));
-    throwIfFailed(d2dDevice->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, m_D2DDeviceContext.GetAddressOf()));
 	m_DuplicationManager.InitDupl(m_Device.Get(), 0);
+
+    ComPtr<ID3D11Texture2D> backbuffer;
+    m_swapChain->GetBuffer(0, IID_PPV_ARGS(backbuffer.GetAddressOf()));
+    m_Device->CreateRenderTargetView(backbuffer.Get(), nullptr, m_RenderTargetView.GetAddressOf());
+
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    texDesc.Width = 692;
+    texDesc.Height = 1440;
+    texDesc.MipLevels = 1;
+    texDesc.ArraySize = 1;
+    texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    texDesc.SampleDesc.Count = 1;
+    texDesc.Usage = D3D11_USAGE_DEFAULT;
+    texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    texDesc.CPUAccessFlags = 0;
+	texDesc.MiscFlags = 0;
+
+    m_Device->CreateTexture2D(&texDesc, nullptr, m_Texture.GetAddressOf());
+	D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+	srvDesc.Format = texDesc.Format;
+	srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+	srvDesc.Texture2D.MipLevels = 1;
+    m_Device->CreateShaderResourceView(m_Texture.Get(), &srvDesc, m_ShaderResourceView.GetAddressOf());
+
+    D3D11_SAMPLER_DESC samplerDesc = {};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    m_Device->CreateSamplerState(&samplerDesc, m_SamplerState.GetAddressOf());
+    m_DeviceContext->OMSetRenderTargets(1, m_RenderTargetView.GetAddressOf(), nullptr);
+
+    D3D11_VIEWPORT viewport = {};
+    viewport.Width = 692.0f;
+    viewport.Height = 1440.0f;
+    viewport.MinDepth = 0.0f;
+    viewport.MaxDepth = 1.0f;
+    viewport.TopLeftX = 0;
+    viewport.TopLeftY = 0;
+    m_DeviceContext->RSSetViewports(1, &viewport);
+
+    CreateShader();
+    CreateQuad();
+
+    ComPtr<IDXGIDevice> dxgiDevice;
+    throwIfFailed(m_Device->QueryInterface(IID_PPV_ARGS(dxgiDevice.GetAddressOf())));
+    return;
 }
 
 CaptureThreadManager::~CaptureThreadManager() {
@@ -134,42 +265,28 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
 
 void CaptureThreadManager::DuplicationLoop() {
     int frameCount = 0;
-    ID3D11DeviceContext* deviceContext;
-    m_DuplicationManager.GetDevice()->GetImmediateContext(&m_DeviceContext);
 
-    ComPtr<ID3D11Texture2D> backBuffer;
-    m_swapChain->GetBuffer(0, IID_PPV_ARGS(&backBuffer));
-    ComPtr<IDXGISurface> dxgiBackBufferSurface;
-    backBuffer->QueryInterface(IID_PPV_ARGS(&dxgiBackBufferSurface)); // This is backbuffer, do not touch it, set as draw target
-    ComPtr<IDXGISurface> dxgiFrameSurface; // Where the frame goes
+    D3D11_TEXTURE2D_DESC texDesc;
+	texDesc.Width = 692;
+	texDesc.Height = 1440;
+	texDesc.MipLevels = 1;
+	texDesc.ArraySize = 1;
+	texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;    
+	texDesc.SampleDesc.Count = 1;
+	texDesc.Usage = D3D11_USAGE_DEFAULT;
+	texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+	texDesc.CPUAccessFlags = 0;
+	texDesc.MiscFlags = 0;
 
-    D2D1_BITMAP_PROPERTIES1 bitmapProperties = D2D1::BitmapProperties1(
-        D2D1_BITMAP_OPTIONS_TARGET,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
-    );
+    D3D11_BOX box;
+    box.left = 187;
+    box.top = 0;
+    box.front = 0;
+    box.right = 879;
+    box.bottom = 1440;
+    box.back = 1;
 
-    D2D1_RENDER_TARGET_PROPERTIES renderTargetProps = D2D1::RenderTargetProperties(
-    D2D1_RENDER_TARGET_TYPE_DEFAULT,
-    D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE)
-    );
-
-    D2D1_BITMAP_PROPERTIES1 renderTargetBitmapProps = D2D1::BitmapProperties1(
-        D2D1_BITMAP_OPTIONS_TARGET,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
-    );
-
-    ComPtr<ID2D1RenderTarget> d2dRenderTarget;
-    throwIfFailed(m_D2DFactory->CreateDxgiSurfaceRenderTarget(
-        dxgiBackBufferSurface.Get(), &renderTargetProps, d2dRenderTarget.GetAddressOf()
-    ));
-    ComPtr<ID2D1Bitmap1> backBufferBitmap;
-    throwIfFailed(m_D2DDeviceContext->CreateBitmapFromDxgiSurface(
-        dxgiBackBufferSurface.Get(),
-        NULL, &backBufferBitmap
-    ));
-    m_D2DDeviceContext->SetTarget(backBufferBitmap.Get());
-
-    ComPtr<ID2D1Bitmap1> d2dFrameBitmap;
+    HRESULT hr;
 
     ComPtr<ID3D11Texture2D> stagingTexture = nullptr;
     std::chrono::duration<double> copyElapsed;
@@ -200,30 +317,40 @@ void CaptureThreadManager::DuplicationLoop() {
                     abort();
                 }
             }
+            ComPtr<ID3D11Texture2D> frameTexture;
+			m_Device->CreateTexture2D(&texDesc, nullptr, frameTexture.GetAddressOf());
             std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
-            //m_DeviceContext->CopyResource(stagingTexture.Get(), data.Frame);
-            data.Frame->QueryInterface(IID_PPV_ARGS(dxgiFrameSurface.GetAddressOf()));
+            //m_DeviceContext->CopyResource(m_Texture.Get(), data.Frame);
+            m_DeviceContext->CopySubresourceRegion(frameTexture.Get(), 0, 0, 0, 0, data.Frame, 0, &box);
 
-            m_D2DDeviceContext->CreateBitmapFromDxgiSurface(
-                dxgiFrameSurface.Get(),
-                &bitmapProperties,
-                d2dFrameBitmap.GetAddressOf()
-            );
-            m_D2DDeviceContext->BeginDraw();
-            m_D2DDeviceContext->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-            m_D2DDeviceContext->DrawBitmap(d2dFrameBitmap.Get(), nullptr, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr);
-            m_D2DDeviceContext->EndDraw();
-            HRESULT hr = m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
-            if (hr == S_OK) m_FrameCount++;
-
+            
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
-            m_DuplicationManager.DoneWithFrame();
             {
                 std::unique_lock<std::mutex> lock(m_Mutex);
-                if (m_FrameQueue.size() >= 20) m_FrameQueue.pop();
-                m_FrameQueue.push(std::move(stagingTexture));
+                //if (m_ReplayDeque.size() >= 20) m_ReplayDeque.pop_front();
+                //m_FrameQueue.push(std::move(stagingTexture));
+                if (m_ReplayDeque.size() >= 360 * 3) {
+					ComPtr<ID3D11Texture2D> drop = std::move(m_ReplayDeque.front());
+					m_DeviceContext->CopyResource(m_Texture.Get(), drop.Get());
+                    float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                    m_DeviceContext->ClearRenderTargetView(m_RenderTargetView.Get(), clearColor);
+                    m_DeviceContext->PSSetShaderResources(0, 1, m_ShaderResourceView.GetAddressOf());
+                    m_DeviceContext->PSSetSamplers(0, 1, m_SamplerState.GetAddressOf());
+
+                    m_DeviceContext->VSSetShader(m_VertexShader.Get(), nullptr, 0);
+                    m_DeviceContext->PSSetShader(m_PixelShader.Get(), nullptr, 0);
+                    m_DeviceContext->Draw(4, 0);
+                    hr = m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
+                    if (hr == DXGI_ERROR_WAS_STILL_DRAWING);
+                    else if (FAILED(hr)) { _CrtDbgBreak(); }
+                    m_FrameCount++;
+                    drop->Release();
+                    m_ReplayDeque.pop_front();
+                }
+                m_ReplayDeque.push_back(std::move(frameTexture));
             }
+            m_DuplicationManager.DoneWithFrame();
             m_CV.notify_one();
         }
         else if (timeout) continue;
@@ -234,7 +361,7 @@ void CaptureThreadManager::DuplicationLoop() {
             std::chrono::duration<double> elapsed = now - lastTime;
             if (elapsed.count() >= 1.0) {
                 lastTime = now;
-                printf("\rFPS: %d | Copy waits: %f", frameCount, copyElapsed.count());
+                printf("\rFPS: %d | Copy waits: %.4f | Deque size: %d", frameCount, copyElapsed.count(), m_ReplayDeque.size());
                 fflush(stdout); // Ensure the output is immediately written to the console
                 frameCount = 0;
                 copyElapsed = std::chrono::duration<double>::zero();

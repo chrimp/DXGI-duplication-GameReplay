@@ -7,7 +7,7 @@
 
 #pragma comment(lib,"d3d11.lib")
 #pragma comment(lib,"dxgi.lib")
-#pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "windowsapp.lib")
 
 using namespace DirectX;
 
@@ -63,6 +63,9 @@ void CallThreadForSave() {
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
+        case WM_CREATE:
+            ShowCursor(FALSE);
+            break;
         case WM_DESTROY:
             PostQuitMessage(0);
             break;
@@ -81,18 +84,16 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
     RegisterClass(&wc);
 
     HWND hWnd = CreateWindowEx(
+        //WS_EX_LAYERED,
         0,
         wc.lpszClassName,
         L"DDAPI Frame Preview",
-        WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT,
-        1920, 1080,
+        WS_POPUP,
+        1000, 0,
+        692, 1440,
         NULL, NULL, hInstance, NULL);
     
-    if (hWnd) {
-        ShowWindow(hWnd, nCmdShow);
-    }
-
+    if (hWnd) ShowWindow(hWnd, nCmdShow);
     return hWnd;
 }
 
