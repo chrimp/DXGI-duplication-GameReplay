@@ -40,24 +40,9 @@ HRESULT EnumOutputsExpectedErrors[] = {
                                           S_OK                                    // Terminate list with zero valued HRESULT
 };
 
-std::unique_ptr<CaptureThreadManager> threadManager;
 ComPtr<ID3D11DeviceContext> context;
 ComPtr<ID3D11Texture2D> texture;
 HWND hWnd;
-
-void CallThreadForSave();
-
-void CallThreadForSave() {
-    //return;
-    bool abort = (threadManager == nullptr || !threadManager->m_Run);
-
-    if (abort) {
-        LogMessage(3, "CallThreadForSave is with illegal ThreadManager");
-        return;
-    }
-
-    threadManager->SaveFrame();
-}
 
 // Here for creating a new window to draw frames
 
@@ -68,6 +53,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             break;
         case WM_DESTROY:
             PostQuitMessage(0);
+            break;
+        case WM_INPUT:
+            ProcessRawInput(lParam);
             break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
@@ -112,14 +100,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
     AllocConsole();
-    FILE* pCout;
+    FILE *pCout, *pCerr;
     freopen_s(&pCout, "CONOUT$", "w", stdout);
+    freopen_s(&pCerr, "CONOUT$", "w", stderr);
     std::cout << "Console is ready" << std::endl;
 
     hWnd = CreateWindowInstance(hInstance, nCmdShow);
-    threadManager = std::make_unique<CaptureThreadManager>(hWnd);
+    CaptureThreadManager::GetInstance().Init(hWnd);
 
-    threadManager->StartThread();
+    RegisterRawInput(hWnd);
+
+    CaptureThreadManager::GetInstance().StartThread();
     MSG msg = {};
     while (WM_QUIT != msg.message) {
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -128,11 +119,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
         }
     }
 
-	threadManager->StopThread();
+	CaptureThreadManager::GetInstance().StopThread();
 
-    if (pCout) {
-        fclose(pCout);
-    }
+    if (pCout) fclose(pCout);
+    if (pCerr) fclose(pCerr);
     FreeConsole();
     return 0;
 }

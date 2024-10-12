@@ -1,6 +1,19 @@
 #include "ThreadManager.hpp"
 #include "../wil/resource.h"
 
+std::string GetGameStatusStr(GameState status) {
+    switch (status) {
+        case MENU:
+            return "MENU";
+        case PLAYING:
+            return "PLAYING";
+        case PAUSED:
+            return "PAUSED";
+        default:
+            return "UNKNOWN";
+    }
+}
+
 void throwIfFailed(HRESULT hr) {
     std::stringstream ss;
     ss << std::hex << hr;
@@ -91,7 +104,8 @@ void CaptureThreadManager::CreateQuad() {
     return;
 }
 
-CaptureThreadManager::CaptureThreadManager(HWND hWnd) : m_Run(false), m_hWnd(hWnd) {
+void CaptureThreadManager::Init(HWND hWnd) {
+    m_hWnd = hWnd;
     m_ReplayDeque.clear();
 
     UINT flag = 0;
@@ -169,8 +183,18 @@ CaptureThreadManager::CaptureThreadManager(HWND hWnd) : m_Run(false), m_hWnd(hWn
     CreateShader();
     CreateQuad();
 
-    ComPtr<IDXGIDevice> dxgiDevice;
-    throwIfFailed(m_Device->QueryInterface(IID_PPV_ARGS(dxgiDevice.GetAddressOf())));
+    D3D11_TEXTURE2D_DESC stagingDesc = {};
+    stagingDesc.Width = 2560;
+    stagingDesc.Height = 1440;
+    stagingDesc.MipLevels = 1;
+    stagingDesc.ArraySize = 1;
+    stagingDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    stagingDesc.SampleDesc.Count = 1;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.MiscFlags = 0;
+    m_Device->CreateTexture2D(&stagingDesc, nullptr, m_StagingTexture.GetAddressOf());
     return;
 }
 
@@ -231,7 +255,7 @@ void CaptureThreadManager::SaveFrame() {
 }
 
 uint8_t count = -1;
-
+/*
 _Success_(return)
 bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
     std::unique_lock<std::mutex> lock(m_Mutex);
@@ -262,7 +286,7 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
     }
     return false;
 }
-
+*/
 void CaptureThreadManager::DuplicationLoop() {
     int frameCount = 0;
 
@@ -273,6 +297,7 @@ void CaptureThreadManager::DuplicationLoop() {
 	texDesc.ArraySize = 1;
 	texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;    
 	texDesc.SampleDesc.Count = 1;
+    texDesc.SampleDesc.Quality = 0;
 	texDesc.Usage = D3D11_USAGE_DEFAULT;
 	texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 	texDesc.CPUAccessFlags = 0;
@@ -288,7 +313,6 @@ void CaptureThreadManager::DuplicationLoop() {
 
     HRESULT hr;
 
-    ComPtr<ID3D11Texture2D> stagingTexture = nullptr;
     std::chrono::duration<double> copyElapsed;
     std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
     while (m_Run) {
@@ -296,41 +320,19 @@ void CaptureThreadManager::DuplicationLoop() {
         bool timeout;
         DUPL_RETURN ret = m_DuplicationManager.GetFrame(&data, &timeout);
         if (ret == DUPL_RETURN_SUCCESS && !timeout) {
-            stagingTexture.Reset();
-            //LogMessage(0, "Got Frame %d", frameCount);
-            frameCount++;
-            D3D11_TEXTURE2D_DESC desc;
-            data.Frame->GetDesc(&desc);
-
-            if (!stagingTexture) {
-                if (stagingTexture) stagingTexture->Release();
-
-                D3D11_TEXTURE2D_DESC newDesc = desc;
-                newDesc.Usage = D3D11_USAGE_STAGING;
-                newDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-                newDesc.BindFlags = 0;
-                newDesc.MiscFlags = 0;
-
-                HRESULT stagingHr = m_DuplicationManager.GetDevice()->CreateTexture2D(&newDesc, nullptr, &stagingTexture);
-                if (FAILED(stagingHr)) {
-                    LogMessage(3, "Failed to create staging texture: 0x%x", stagingHr);
-                    abort();
-                }
-            }
             ComPtr<ID3D11Texture2D> frameTexture;
 			m_Device->CreateTexture2D(&texDesc, nullptr, frameTexture.GetAddressOf());
             std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
-            //m_DeviceContext->CopyResource(m_Texture.Get(), data.Frame);
+            std::unique_lock lockForStaging(m_Mutex);
+            m_DeviceContext->CopyResource(m_StagingTexture.Get(), data.Frame);
+            lockForStaging.unlock();
             m_DeviceContext->CopySubresourceRegion(frameTexture.Get(), 0, 0, 0, 0, data.Frame, 0, &box);
-
-            
+            frameCount++;
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
             {
                 std::unique_lock<std::mutex> lock(m_Mutex);
-                //if (m_ReplayDeque.size() >= 20) m_ReplayDeque.pop_front();
-                //m_FrameQueue.push(std::move(stagingTexture));
-                if (m_ReplayDeque.size() >= 360 * 3) {
+                if (m_ReplayDeque.size() >= 360 * 3) { // Expected VRAM usage: 4.3G
 					ComPtr<ID3D11Texture2D> drop = std::move(m_ReplayDeque.front());
 					m_DeviceContext->CopyResource(m_Texture.Get(), drop.Get());
                     float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -359,9 +361,9 @@ void CaptureThreadManager::DuplicationLoop() {
         if (m_FPSEnabled) {
             std::chrono::time_point<std::chrono::high_resolution_clock> now = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = now - lastTime;
-            if (elapsed.count() >= 1.0) {
+            if (elapsed.count() >= 1.0 && frameCount > 0) {
                 lastTime = now;
-                printf("\rFPS: %d | Copy waits: %.4f | Deque size: %d", frameCount, copyElapsed.count(), m_ReplayDeque.size());
+                printf("\rFPS: %d | Copy waits: %.4f | Deque size: %d | Game status: %s", frameCount, copyElapsed.count(), m_ReplayDeque.size(), GetGameStatusStr(m_IsGamePaused).c_str());
                 fflush(stdout); // Ensure the output is immediately written to the console
                 frameCount = 0;
                 copyElapsed = std::chrono::duration<double>::zero();

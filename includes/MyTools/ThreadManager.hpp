@@ -15,15 +15,29 @@
 #include "LogMessage.hpp"
 #include "opencv2/opencv.hpp"
 
+enum GameState {
+	MENU,
+	PLAYING,
+	PAUSED
+};
+
 class CaptureThreadManager {
 	public:
-	CaptureThreadManager(HWND hWnd);
-	~CaptureThreadManager();
+	static CaptureThreadManager& GetInstance() {
+		static CaptureThreadManager instance;
+		return instance;
+	}
+	CaptureThreadManager(CaptureThreadManager const&) = delete;
+	void operator=(CaptureThreadManager const&) = delete;
+
+	void Init(HWND hWnd);
 	void StartThread();
 	void StopThread();
 	void ToggleFPS();
 	void SaveFrame();
 	void SethWnd(HWND hWnd) { m_hWnd = hWnd; }
+	void UpdateGameStatus(unsigned int status) { m_IsGamePaused = static_cast<GameState>(status); }
+	bool ResumeCallback();
 	bool QueueForCopy();
 	ComPtr<ID3D11Device> GetDevice() { return m_Device; }
 
@@ -32,17 +46,21 @@ class CaptureThreadManager {
 	std::atomic<bool> m_Run;
 
 	private:
+	CaptureThreadManager() : m_Run(false) {};
+	~CaptureThreadManager();
+
 	unsigned long m_FrameCount = 0;
 	bool m_Draw = false;
 	
 	ComPtr<ID3D11Texture2D> m_CopyDest;
-	std::queue<ComPtr<ID3D11Texture2D>> m_FrameQueue;
+	ComPtr<ID3D11Texture2D> m_StagingTexture;
 	std::deque<ComPtr<ID3D11Texture2D>> m_ReplayDeque;
 	std::thread m_Thread;
 	std::thread m_SaveThread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
 	std::atomic<bool> m_FPSEnabled = true;
+	GameState m_IsGamePaused = MENU;
 	DUPLICATIONMANAGER m_DuplicationManager;
 
 	ComPtr<ID3D11Device> m_Device;

@@ -67,10 +67,10 @@ void ProcessRawInput(LPARAM lParam) {
                         ((void(*)())enterCallback)();
                     }
                 }
-                //LogMessage(0, "Key down: %d", rawKB.VKey);
+                LogMessage(0, "Key down: %d", rawKB.VKey);
                 break;
             case WM_KEYUP:
-                //LogMessage(0, "Key up: %d", rawKB.VKey);
+                LogMessage(0, "Key up: %d", rawKB.VKey);
                 break;
         }
     }
