@@ -25,10 +25,6 @@ HWND CreateHiddenWindow() {
     return hwnd;
 }
 
-void RegisterEnterCallback(void* callback) {
-    enterCallback = callback;
-}
-
 void RegisterRawInput(HWND hwnd) {
     RAWINPUTDEVICE rid;
 
@@ -63,14 +59,14 @@ void ProcessRawInput(LPARAM lParam) {
         switch (rawKB.Message) {
             case WM_KEYDOWN:
                 if (rawKB.VKey == VK_RETURN) {
-                    if (enterCallback != nullptr) {
-                        ((void(*)())enterCallback)();
-                    }
+                    CaptureThreadManager::GetInstance().ResumeCallback();
+                } else if (rawKB.VKey == VK_ESCAPE) {
+                    CaptureThreadManager::GetInstance().PauseCallback();
                 }
-                //LogMessage(0, "Key down: %d", rawKB.VKey);
+                LogMessage(0, "Key down: %d", rawKB.VKey);
                 break;
             case WM_KEYUP:
-                //LogMessage(0, "Key up: %d", rawKB.VKey);
+                LogMessage(0, "Key up: %d", rawKB.VKey);
                 break;
         }
     }

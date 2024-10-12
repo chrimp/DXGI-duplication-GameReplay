@@ -7,5 +7,6 @@
 #include <iostream>
 
 void LogMessage(int level, const std::string& message, ...);
+void LogMessage(int level, const std::wstring& message, ...);
 
 #endif

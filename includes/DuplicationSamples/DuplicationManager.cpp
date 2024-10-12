@@ -205,7 +205,7 @@ DUPL_RETURN DUPLICATIONMANAGER::GetFrame(_Out_ FRAME_DATA* Data, _Out_ bool* Tim
     DXGI_OUTDUPL_FRAME_INFO FrameInfo;
 
     // Get new frame
-    HRESULT hr = m_DeskDupl->AcquireNextFrame(500, &FrameInfo, &DesktopResource);
+    HRESULT hr = m_DeskDupl->AcquireNextFrame(3, &FrameInfo, &DesktopResource);
     if (hr == DXGI_ERROR_WAIT_TIMEOUT)
     {
         *Timeout = true;

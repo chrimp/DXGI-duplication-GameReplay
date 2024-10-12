@@ -4,10 +4,12 @@
 #include "./includes/MyTools/ThreadManager.hpp"
 #include "./includes/MyTools/LogMessage.hpp"
 #include "./includes/MyTools/RawInputCapture.hpp"
+#include "./includes/MyTools/Procmon.hpp"
 
 #pragma comment(lib,"d3d11.lib")
 #pragma comment(lib,"dxgi.lib")
 #pragma comment(lib, "windowsapp.lib")
+#pragma comment(lib, "procmonsdk.lib")
 
 using namespace DirectX;
 
@@ -40,24 +42,9 @@ HRESULT EnumOutputsExpectedErrors[] = {
                                           S_OK                                    // Terminate list with zero valued HRESULT
 };
 
-std::unique_ptr<CaptureThreadManager> threadManager;
 ComPtr<ID3D11DeviceContext> context;
 ComPtr<ID3D11Texture2D> texture;
 HWND hWnd;
-
-void CallThreadForSave();
-
-void CallThreadForSave() {
-    //return;
-    bool abort = (threadManager == nullptr || !threadManager->m_Run);
-
-    if (abort) {
-        LogMessage(3, "CallThreadForSave is with illegal ThreadManager");
-        return;
-    }
-
-    threadManager->SaveFrame();
-}
 
 // Here for creating a new window to draw frames
 
@@ -68,6 +55,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             break;
         case WM_DESTROY:
             PostQuitMessage(0);
+            break;
+        case WM_INPUT:
+            ProcessRawInput(lParam);
             break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
@@ -84,12 +74,11 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
     RegisterClass(&wc);
 
     HWND hWnd = CreateWindowEx(
-        //WS_EX_LAYERED,
-        0,
+        WS_EX_NOACTIVATE,
         wc.lpszClassName,
         L"DDAPI Frame Preview",
         WS_POPUP,
-        1000, 0,
+        187, 0,
         692, 1440,
         NULL, NULL, hInstance, NULL);
     
@@ -98,41 +87,34 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
-    std::filesystem::path here = "./";
-    try {
-        for (const auto& entry: std::filesystem::directory_iterator(here)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
-                std::filesystem::remove(entry.path());
-            }
-        }
-    } catch (std::filesystem::filesystem_error& e) {
-        LogMessage(3, "Error: %s", e.what());
-    } catch (std::exception& e) {
-        LogMessage(3, "Error: %s", e.what());
-    }
-
     AllocConsole();
-    FILE* pCout;
+    FILE *pCout, *pCerr;
     freopen_s(&pCout, "CONOUT$", "w", stdout);
+    freopen_s(&pCerr, "CONOUT$", "w", stderr);
     std::cout << "Console is ready" << std::endl;
 
     hWnd = CreateWindowInstance(hInstance, nCmdShow);
-    threadManager = std::make_unique<CaptureThreadManager>(hWnd);
+    CaptureThreadManager::GetInstance().Init(hWnd);
 
-    threadManager->StartThread();
+    RegisterRawInput(hWnd);
+
+    //StartListenLoop();
+    if (!StartProcmon()) _CrtDbgBreak();
+    CaptureThreadManager::GetInstance().StartThread();
     MSG msg = {};
     while (WM_QUIT != msg.message) {
-        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (GetMessage(&msg, nullptr, 0, 0)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
     }
 
-	threadManager->StopThread();
+	CaptureThreadManager::GetInstance().StopThread();
+    StopProcmon();
+	//StopListenLoop();
 
-    if (pCout) {
-        fclose(pCout);
-    }
+    if (pCout) fclose(pCout);
+    if (pCerr) fclose(pCerr);
     FreeConsole();
     return 0;
 }
