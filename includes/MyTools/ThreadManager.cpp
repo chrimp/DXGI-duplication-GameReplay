@@ -231,7 +231,7 @@ GameState CaptureThreadManager::PauseCallback() {
 	return m_GameState;
 }
 
-int xcoords[7] = { 1040, 1100, 1180, 1260, 1330, 1380, 1470 };
+int xcoords[8] = { 1040, 1100, 1160, 1190, 1260, 1330, 1365, 1470 };
 int ycoords[4] = { 540, 690, 830, 960 };
 
 GameState CaptureThreadManager::ResumeCallback() {
@@ -260,7 +260,11 @@ GameState CaptureThreadManager::ResumeCallback() {
     // - Or, making it render for only three seconds, then reset the flag.
     // - By this way I don't have to make a separate flag for exhaustion, and buffer will be still filled.
     // - However this will include recursive recording (recording the replay), which is not a big deal, but not ideal anyways.
-    if (m_GameState != PAUSED) return m_GameState;
+
+    if (m_GameState != PAUSED) {
+        LogMessage(0, "Game is not paused");
+        return m_GameState;
+    }
     m_BlockLoop = true; // This will block loop with condition variable
     D3D11_MAPPED_SUBRESOURCE mappedResource;
     m_DeviceContext->Map(m_StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
@@ -268,46 +272,44 @@ GameState CaptureThreadManager::ResumeCallback() {
     cv::Mat frame(1440, 2560, CV_8UC4, src);
     cv::Mat image;
     cv::cvtColor(frame, image, cv::COLOR_BGRA2GRAY);
-    cv::threshold(image, image, 170, 255, cv::THRESH_BINARY);
-    
+    cv::threshold(image, image, 160, 255, cv::THRESH_BINARY);
+    m_DeviceContext->Unmap(m_StagingTexture.Get(), 0);
+    m_BlockLoop = false;
+    m_BlockLoopCV.notify_one();
+    bool selectionCheck = false;
     bool pause = true;
     for (const int& x: xcoords) {
         if (image.at<uint8_t>(270, x) != 255) {
             pause = false;
             m_GameState = PAUSED;
-            LogMessage(0, "Game is still paused: ResumeCallback()");
+            LogMessage(0, "Can't detect PAUSE on top: ResumeCallback() | %d", x);
             goto clean;
         }
     }
-
+    
     for (const int& y: ycoords) {
-        if (image.at<uint8_t>(y, 1600) == 255) {
+        LogMessage(0, "Checking %d", y);
+        if (image.at<uint8_t>(y, 1597) == 255) {
             if (y == 540) {
                 m_GameState = PLAYING;
                 // Set flag here for buffer exhuastion
                 LogMessage(0, "Game resumed: ResumeCallback() | %d", y);
             }
             else if (y == 690) {
-                m_GameState = MENU;
+                m_GameState = PAUSED;
                 LogMessage(0, "Game is being restarted: ResumeCallback() | %d", y);
             }
             else if (y == 830) {
-                m_GameState = MENU;
+                m_GameState = PAUSED;
                 LogMessage(0, "Game is in settings: ResumeCallback() | %d", y);
             }
             else if (y == 960) {
                 m_GameState = MENU;
                 LogMessage(0, "User quitted the play: ResumeCallback() | %d", y);
-            } else {
-                // Unguarded state
-                _CrtDbgBreak();
             }
         }
     }
 clean:
-    m_DeviceContext->Unmap(m_StagingTexture.Get(), 0);
-    m_BlockLoop = false;
-    m_BlockLoopCV.notify_one();
     return m_GameState;
     // Should implement esc to resume in future
 }
@@ -377,6 +379,20 @@ bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
     return false;
 }
 */
+
+void SetCursorPosition(int x, int y) {
+    COORD coord;
+    coord.X = x;
+    coord.Y = y;
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+}
+
+int GetConsoleHeight() {
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+    return csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+}
+
 void CaptureThreadManager::DuplicationLoop() {
     int frameCount = 0;
 
@@ -457,8 +473,20 @@ void CaptureThreadManager::DuplicationLoop() {
             std::chrono::duration<double> elapsed = now - lastTime;
             if (elapsed.count() >= 1.0 && frameCount > 0) {
                 lastTime = now;
-                printf("\rFPS: %d | Copy waits: %.4f | Deque size: %d | Game status: %s", frameCount, copyElapsed.count(), m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str());
+                CONSOLE_SCREEN_BUFFER_INFO csbi;
+                GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+                COORD originalPos = csbi.dwCursorPosition;
+                SetCursorPosition(0, GetConsoleHeight() - 1);
+
+                // Clear the line
+                for (int i = 0; i < csbi.dwSize.X; i++) {
+                    std::cout << " ";
+                }
+
+                SetCursorPosition(0, GetConsoleHeight() - 1);
+                printf("FPS: %d | Copy waits: %.4f | Deque size: %d | Game status: %s", frameCount, copyElapsed.count(), m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str());
                 fflush(stdout); // Ensure the output is immediately written to the console
+                SetCursorPosition(originalPos.X, originalPos.Y);
                 frameCount = 0;
                 copyElapsed = std::chrono::duration<double>::zero();
             }

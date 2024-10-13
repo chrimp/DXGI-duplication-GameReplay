@@ -17,7 +17,7 @@ void LogMessage(int level, const std::string& message, ...) {
         std::cout << "INFO: " << buffer << std::endl;
         break;
         case 2:
-        std::cout << "\033[0;93[WARNING: " << buffer << "\033[0m" << std::endl;
+        std::cout << "\033[0;93mWARNING: " << buffer << "\033[0m" << std::endl;
         break;
         case 3:
         std::cout << "\033[0;91mERROR: " << buffer << "\033[0m" << std::endl;
