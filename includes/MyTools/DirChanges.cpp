@@ -45,6 +45,11 @@ void ListenFileEventLoop() {
         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL
     );
 
+    if (hDir == INVALID_HANDLE_VALUE) {
+		ULONG err = GetLastError();
+        _CrtDbgBreak();
+    }
+
     BYTE buffer[4096];
     DWORD bytesReturned;
 
@@ -54,25 +59,37 @@ void ListenFileEventLoop() {
             &bytesReturned, NULL, NULL
         )) {
             FILE_NOTIFY_INFORMATION* fni = (FILE_NOTIFY_INFORMATION*)buffer;
+            LogMessage(0, "File event detected");
             ProcessFileEvent(fni, path);    
         } else {
             std::cout << "Error: " << GetLastError() << std::endl;
         }
     }
+    CloseHandle(hDir);
 }
 
 void ProcessFileEvent(FILE_NOTIFY_INFORMATION *pfni, std::filesystem::path parentPath) {
-    while (pfni->NextEntryOffset != 0) {
+    do {
         std::wstring filename(pfni->FileName, pfni->FileNameLength / sizeof(WCHAR));
         if (filename.find(L".ogg") != std::wstring::npos) {
             std::wstring fullPath = parentPath.wstring() + filename;
-            // Update CaptureThread's gamestate
-            CaptureThreadManager::GetInstance().UpdateGameStatus(1); // 0 = MENU, 1 = PLAYING, 2 = PAUSED
+            CaptureThreadManager::GetInstance().UpdateGameState(1); // 0 = MENU, 1 = PLAYING, 2 = PAUSED
         } else if (filename.find(L".mp4") != std::wstring::npos) {
             std::wstring fullPath = parentPath.wstring() + filename;
-            // Update CaptureThread's gamestate
-            CaptureThreadManager::GetInstance().UpdateGameStatus(0); // 0 = MENU, 1 = PLAYING, 2 = PAUSED
+            CaptureThreadManager::GetInstance().UpdateGameState(0); // 0 = MENU, 1 = PLAYING, 2 = PAUSED
         }
         pfni = (FILE_NOTIFY_INFORMATION*)((BYTE*)pfni + pfni->NextEntryOffset);
-    }
+    } while (pfni->NextEntryOffset != 0);
+}
+
+std::thread loop;
+
+void StartListenLoop() {
+    run = true;
+    loop = std::thread(ListenFileEventLoop);
+}
+
+void StopListenLoop() {
+    run = false;
+    if (loop.joinable()) loop.join();
 }

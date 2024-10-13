@@ -4,6 +4,7 @@
 #include "./includes/MyTools/ThreadManager.hpp"
 #include "./includes/MyTools/LogMessage.hpp"
 #include "./includes/MyTools/RawInputCapture.hpp"
+#include "./includes/MyTools/DirChanges.hpp"
 
 #pragma comment(lib,"d3d11.lib")
 #pragma comment(lib,"dxgi.lib")
@@ -110,6 +111,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     RegisterRawInput(hWnd);
 
+    StartListenLoop();
     CaptureThreadManager::GetInstance().StartThread();
     MSG msg = {};
     while (WM_QUIT != msg.message) {
@@ -120,6 +122,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
 	CaptureThreadManager::GetInstance().StopThread();
+	StopListenLoop();
 
     if (pCout) fclose(pCout);
     if (pCerr) fclose(pCerr);

@@ -33,34 +33,34 @@ class CaptureThreadManager {
 	void Init(HWND hWnd);
 	void StartThread();
 	void StopThread();
-	void ToggleFPS();
+	void ToggleFPS() { m_FPSEnabled = !m_FPSEnabled; };
 	void SaveFrame();
-	void SethWnd(HWND hWnd) { m_hWnd = hWnd; }
-	void UpdateGameStatus(unsigned int status) { m_IsGamePaused = static_cast<GameState>(status); }
-	bool ResumeCallback();
+	void UpdateGameState(unsigned int status) {
+		m_GameState = static_cast<GameState>(status); 
+		LogMessage(0, "Updated Game status: %d", status);
+	}
+	GameState PauseCallback();
+	GameState ResumeCallback();
 	bool QueueForCopy();
 	ComPtr<ID3D11Device> GetDevice() { return m_Device; }
 
     _Success_(return)
     bool GetFrame(_Out_ std::vector<uint8_t>& data);
-	std::atomic<bool> m_Run;
+	
 
 	private:
-	CaptureThreadManager() : m_Run(false) {};
+	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true) {};
 	~CaptureThreadManager();
 
 	unsigned long m_FrameCount = 0;
 	bool m_Draw = false;
-	
-	ComPtr<ID3D11Texture2D> m_CopyDest;
-	ComPtr<ID3D11Texture2D> m_StagingTexture;
+	std::atomic<bool> m_Run, m_FPSEnabled;
+
 	std::deque<ComPtr<ID3D11Texture2D>> m_ReplayDeque;
-	std::thread m_Thread;
-	std::thread m_SaveThread;
+	std::thread m_Thread, m_SaveThread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
-	std::atomic<bool> m_FPSEnabled = true;
-	GameState m_IsGamePaused = MENU;
+	GameState m_GameState = MENU;
 	DUPLICATIONMANAGER m_DuplicationManager;
 
 	ComPtr<ID3D11Device> m_Device;
@@ -72,7 +72,7 @@ class CaptureThreadManager {
 	ComPtr<ID3D11VertexShader> m_VertexShader;
 	ComPtr<ID3D11PixelShader> m_PixelShader;
 	ComPtr<ID3D11InputLayout> m_InputLayout;
-	ComPtr<ID3D11Texture2D> m_Texture;
+	ComPtr<ID3D11Texture2D> m_Texture, m_StagingTexture;
 	ComPtr<ID3D11Buffer> m_VertexBuffer;
 
 	HWND m_hWnd;

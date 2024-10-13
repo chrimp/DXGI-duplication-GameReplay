@@ -11,12 +11,10 @@
 #include "../MyTools/LogMessage.hpp"
 #include "ThreadManager.hpp"
 
-
 void ListenFileEventLoop();
 void ProcessFileEvent(FILE_NOTIFY_INFORMATION *pfni, std::filesystem::path parentPath);
 void StartListenLoop();
 void StopListenLoop();
 std::filesystem::path FindProcessPath();
-
 
 #endif // DIRCHANGES_HPP
