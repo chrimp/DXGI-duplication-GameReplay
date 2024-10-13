@@ -53,13 +53,14 @@ class CaptureThreadManager {
 	~CaptureThreadManager();
 
 	unsigned long m_FrameCount = 0;
-	bool m_Draw = false;
+	bool m_BlockLoop = false;
 	std::atomic<bool> m_Run, m_FPSEnabled;
 
 	std::deque<ComPtr<ID3D11Texture2D>> m_ReplayDeque;
 	std::thread m_Thread, m_SaveThread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
+	std::condition_variable m_BlockLoopCV;
 	GameState m_GameState = MENU;
 	DUPLICATIONMANAGER m_DuplicationManager;
 

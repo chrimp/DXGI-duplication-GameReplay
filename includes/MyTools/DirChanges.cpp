@@ -32,6 +32,8 @@ std::filesystem::path FindProcessPath() {
     return path;
 }
 
+HANDLE hDir;
+
 void ListenFileEventLoop() {
     std::filesystem::path path = FindProcessPath();
     if (path.empty()) {
@@ -39,7 +41,7 @@ void ListenFileEventLoop() {
         return;
     }
 
-    HANDLE hDir = CreateFile(
+    hDir = CreateFile(
         path.wstring().c_str(), FILE_LIST_DIRECTORY,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL
@@ -59,7 +61,6 @@ void ListenFileEventLoop() {
             &bytesReturned, NULL, NULL
         )) {
             FILE_NOTIFY_INFORMATION* fni = (FILE_NOTIFY_INFORMATION*)buffer;
-            LogMessage(0, "File event detected");
             ProcessFileEvent(fni, path);    
         } else {
             std::cout << "Error: " << GetLastError() << std::endl;
@@ -68,15 +69,24 @@ void ListenFileEventLoop() {
     CloseHandle(hDir);
 }
 
+std::chrono::system_clock::time_point lastPlayTime;
+bool isPlaying = false;
+
 void ProcessFileEvent(FILE_NOTIFY_INFORMATION *pfni, std::filesystem::path parentPath) {
     do {
         std::wstring filename(pfni->FileName, pfni->FileNameLength / sizeof(WCHAR));
         if (filename.find(L".ogg") != std::wstring::npos) {
+			lastPlayTime = std::chrono::system_clock::now();
+            isPlaying = true;
             std::wstring fullPath = parentPath.wstring() + filename;
             CaptureThreadManager::GetInstance().UpdateGameState(1); // 0 = MENU, 1 = PLAYING, 2 = PAUSED
         } else if (filename.find(L".mp4") != std::wstring::npos) {
-            std::wstring fullPath = parentPath.wstring() + filename;
-            CaptureThreadManager::GetInstance().UpdateGameState(0); // 0 = MENU, 1 = PLAYING, 2 = PAUSED
+            std::chrono::seconds gap{ std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - lastPlayTime) };
+            if (isPlaying && gap.count() > 1) {
+                isPlaying = false;
+                std::wstring fullPath = parentPath.wstring() + filename;
+                CaptureThreadManager::GetInstance().UpdateGameState(0);
+            }
         }
         pfni = (FILE_NOTIFY_INFORMATION*)((BYTE*)pfni + pfni->NextEntryOffset);
     } while (pfni->NextEntryOffset != 0);
@@ -87,9 +97,10 @@ std::thread loop;
 void StartListenLoop() {
     run = true;
     loop = std::thread(ListenFileEventLoop);
+    loop.detach();
 }
 
 void StopListenLoop() {
     run = false;
-    if (loop.joinable()) loop.join();
+    CloseHandle(hDir);
 }

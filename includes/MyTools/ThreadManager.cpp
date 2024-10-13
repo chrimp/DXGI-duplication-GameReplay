@@ -261,7 +261,7 @@ GameState CaptureThreadManager::ResumeCallback() {
     // - By this way I don't have to make a separate flag for exhaustion, and buffer will be still filled.
     // - However this will include recursive recording (recording the replay), which is not a big deal, but not ideal anyways.
     if (m_GameState != PAUSED) return m_GameState;
-    std::unique_lock<std::mutex> lockForStaging(m_Mutex); // Locking the staging texture
+    m_BlockLoop = true; // This will block loop with condition variable
     D3D11_MAPPED_SUBRESOURCE mappedResource;
     m_DeviceContext->Map(m_StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
     uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
@@ -276,7 +276,7 @@ GameState CaptureThreadManager::ResumeCallback() {
             pause = false;
             m_GameState = PAUSED;
             LogMessage(0, "Game is still paused: ResumeCallback()");
-            return m_GameState;
+            goto clean;
         }
     }
 
@@ -285,30 +285,30 @@ GameState CaptureThreadManager::ResumeCallback() {
             if (y == 540) {
                 m_GameState = PLAYING;
                 // Set flag here for buffer exhuastion
-                LogMessage(0, "Game resumed: ResumeCallback()");
-                return m_GameState;
+                LogMessage(0, "Game resumed: ResumeCallback() | %d", y);
             }
             else if (y == 690) {
                 m_GameState = MENU;
-                LogMessage(0, "Game is being restarted: ResumeCallback()");
-                return m_GameState;
+                LogMessage(0, "Game is being restarted: ResumeCallback() | %d", y);
             }
             else if (y == 830) {
                 m_GameState = MENU;
-                LogMessage(0, "Game is in settings: ResumeCallback()");
-                return m_GameState;
+                LogMessage(0, "Game is in settings: ResumeCallback() | %d", y);
             }
             else if (y == 960) {
                 m_GameState = MENU;
-                LogMessage(0, "User quitted the play: ResumeCallback()");
-                return m_GameState;
+                LogMessage(0, "User quitted the play: ResumeCallback() | %d", y);
             } else {
                 // Unguarded state
                 _CrtDbgBreak();
             }
         }
     }
-
+clean:
+    m_DeviceContext->Unmap(m_StagingTexture.Get(), 0);
+    m_BlockLoop = false;
+    m_BlockLoopCV.notify_one();
+    return m_GameState;
     // Should implement esc to resume in future
 }
 
@@ -414,9 +414,15 @@ void CaptureThreadManager::DuplicationLoop() {
 			m_Device->CreateTexture2D(&texDesc, nullptr, frameTexture.GetAddressOf());
             std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
             std::unique_lock lockForStaging(m_Mutex);
+			m_BlockLoopCV.wait(lockForStaging, [this] { return !m_BlockLoop; });
+			if (m_BlockLoop) {
+				lockForStaging.unlock();
+                m_DuplicationManager.DoneWithFrame();
+				continue;
+			}
             m_DeviceContext->CopyResource(m_StagingTexture.Get(), data.Frame);
-            lockForStaging.unlock();
             m_DeviceContext->CopySubresourceRegion(frameTexture.Get(), 0, 0, 0, 0, data.Frame, 0, &box);
+            lockForStaging.unlock();
             frameCount++;
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
