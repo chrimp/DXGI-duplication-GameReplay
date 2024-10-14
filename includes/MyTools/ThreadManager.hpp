@@ -21,6 +21,11 @@ enum GameState {
 	PAUSED
 };
 
+struct FrameData {
+	ComPtr<ID3D11Texture2D> Frame;
+	std::chrono::time_point<std::chrono::high_resolution_clock> Time;
+};
+
 class CaptureThreadManager {
 	public:
 	static CaptureThreadManager& GetInstance() {
@@ -35,10 +40,7 @@ class CaptureThreadManager {
 	void StopThread();
 	void ToggleFPS() { m_FPSEnabled = !m_FPSEnabled; };
 	void SaveFrame();
-	void UpdateGameState(unsigned int status) {
-		m_GameState = static_cast<GameState>(status); 
-		LogMessage(0, "Updated Game status: %d", status);
-	}
+	void UpdateGameState(unsigned int status);
 	GameState PauseCallback();
 	GameState ResumeCallback();
 	bool QueueForCopy();
@@ -57,7 +59,7 @@ class CaptureThreadManager {
 	bool m_ShowReplay = false;
 	std::atomic<bool> m_Run, m_FPSEnabled;
 
-	std::deque<ComPtr<ID3D11Texture2D>> m_ReplayDeque;
+	std::deque<FrameData> m_ReplayDeque;
 	std::thread m_Thread, m_SaveThread;
 	std::mutex m_Mutex;
 	std::condition_variable m_CV;
@@ -81,6 +83,7 @@ class CaptureThreadManager {
 	void DuplicationLoop();
 	void CreateShader();
 	void CreateQuad();
+	void playReplay();
 };
 
 #endif
