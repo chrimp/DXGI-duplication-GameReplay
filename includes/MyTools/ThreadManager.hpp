@@ -54,6 +54,7 @@ class CaptureThreadManager {
 
 	unsigned long m_FrameCount = 0;
 	bool m_BlockLoop = false;
+	bool m_ShowReplay = false;
 	std::atomic<bool> m_Run, m_FPSEnabled;
 
 	std::deque<ComPtr<ID3D11Texture2D>> m_ReplayDeque;

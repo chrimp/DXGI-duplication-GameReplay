@@ -293,6 +293,11 @@ GameState CaptureThreadManager::ResumeCallback() {
             if (y == 540) {
                 m_GameState = PLAYING;
                 // Set flag here for buffer exhuastion
+                if (!m_ShowReplay) {
+                    m_ShowReplay = true;
+                    ShowWindow(m_hWnd, SW_RESTORE);
+					SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                }
                 LogMessage(0, "Game resumed: ResumeCallback() | %d", y);
             }
             else if (y == 690) {
@@ -409,18 +414,14 @@ void CaptureThreadManager::DuplicationLoop() {
 	texDesc.CPUAccessFlags = 0;
 	texDesc.MiscFlags = 0;
 
-    D3D11_BOX box;
-    box.left = 187;
-    box.top = 0;
-    box.front = 0;
-    box.right = 879;
-    box.bottom = 1440;
-    box.back = 1;
+	D3D11_BOX box; box.left = 187; box.right = 879; box.top = 0; box.bottom = 1440; box.front = 0; box.back = 1;
 
     HRESULT hr;
     float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
     std::chrono::duration<double> copyElapsed = std::chrono::duration<double>::zero();
     std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
+
+    ShowWindow(m_hWnd, SW_MINIMIZE);
     while (m_Run) {
         _FRAME_DATA data;
         bool timeout;
@@ -438,29 +439,37 @@ void CaptureThreadManager::DuplicationLoop() {
 			}
             m_DeviceContext->CopyResource(m_StagingTexture.Get(), data.Frame);
             m_DeviceContext->CopySubresourceRegion(frameTexture.Get(), 0, 0, 0, 0, data.Frame, 0, &box);
+            if (frameTexture.Get() == NULL) _CrtDbgBreak();
             lockForStaging.unlock();
             frameCount++;
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
             {
                 std::unique_lock<std::mutex> lock(m_Mutex);
-                if (m_ReplayDeque.size() >= 360 * 3) { // Expected VRAM usage: 4.3G
+                if (m_ShowReplay && m_ReplayDeque.empty()) {
+                    m_ShowReplay = false;
+					ShowWindow(m_hWnd, SW_MINIMIZE);
+                }
+                else if (m_ReplayDeque.size() >= 360 * 3 || m_ShowReplay) { // Expected VRAM usage: 4.3G
 					ComPtr<ID3D11Texture2D> drop = std::move(m_ReplayDeque.front());
-					m_DeviceContext->CopyResource(m_Texture.Get(), drop.Get());
-                    m_DeviceContext->ClearRenderTargetView(m_RenderTargetView.Get(), clearColor);
-                    m_DeviceContext->PSSetShaderResources(0, 1, m_ShaderResourceView.GetAddressOf());
-                    m_DeviceContext->PSSetSamplers(0, 1, m_SamplerState.GetAddressOf());
-                    m_DeviceContext->VSSetShader(m_VertexShader.Get(), nullptr, 0);
-                    m_DeviceContext->PSSetShader(m_PixelShader.Get(), nullptr, 0);
-                    m_DeviceContext->Draw(4, 0);
-                    hr = m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
-                    if (hr == DXGI_ERROR_WAS_STILL_DRAWING);
-                    else if (FAILED(hr)) { _CrtDbgBreak(); }
+                    if (drop == NULL) _CrtDbgBreak();
+                    if (m_ShowReplay) {
+                        m_DeviceContext->CopyResource(m_Texture.Get(), drop.Get());
+                        m_DeviceContext->ClearRenderTargetView(m_RenderTargetView.Get(), clearColor);
+                        m_DeviceContext->PSSetShaderResources(0, 1, m_ShaderResourceView.GetAddressOf());
+                        m_DeviceContext->PSSetSamplers(0, 1, m_SamplerState.GetAddressOf());
+                        m_DeviceContext->VSSetShader(m_VertexShader.Get(), nullptr, 0);
+                        m_DeviceContext->PSSetShader(m_PixelShader.Get(), nullptr, 0);
+                        m_DeviceContext->Draw(4, 0);
+                        hr = m_swapChain->Present(1, DXGI_PRESENT_DO_NOT_WAIT);
+                        if (hr == DXGI_ERROR_WAS_STILL_DRAWING);
+                        else if (FAILED(hr)) { _CrtDbgBreak(); }
+                    }
                     m_FrameCount++;
-                    drop->Release();
+                    //drop->Release();
                     m_ReplayDeque.pop_front();
                 }
-                m_ReplayDeque.push_back(std::move(frameTexture));
+                if (!m_ShowReplay) m_ReplayDeque.push_back(std::move(frameTexture));
             }
             m_DuplicationManager.DoneWithFrame();
             m_CV.notify_one();
@@ -471,7 +480,7 @@ void CaptureThreadManager::DuplicationLoop() {
         if (m_FPSEnabled) {
             std::chrono::time_point<std::chrono::high_resolution_clock> now = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> elapsed = now - lastTime;
-            if (elapsed.count() >= 1.0 && frameCount > 0) {
+            if (elapsed.count() >= 1.0) {
                 lastTime = now;
                 CONSOLE_SCREEN_BUFFER_INFO csbi;
                 GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
