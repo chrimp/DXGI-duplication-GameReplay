@@ -53,6 +53,7 @@ class CaptureThreadManager {
 	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true), m_hWnd(NULL), m_gameHWND(NULL) {};
 	~CaptureThreadManager();
 
+	double m_WaitDuration = 1.0 / 360;
 	unsigned long m_FrameCount = 0;
 	bool m_BlockLoop = false;
 	bool m_ShowReplay = false;

@@ -303,20 +303,25 @@ GameState CaptureThreadManager::ResumeCallback() {
                 if (!m_ShowReplay) {
                     m_ShowReplay = true;
                     playReplay();
+                    m_ShowReplay = false;
                 }
                 LogMessage(0, "Game resumed: ResumeCallback() | %d", y);
+                break;
             }
             else if (y == 690) {
                 m_GameState = PAUSED;
                 LogMessage(0, "Game is being restarted: ResumeCallback() | %d", y);
+                break;
             }
             else if (y == 830) {
                 m_GameState = PAUSED;
                 LogMessage(0, "Game is in settings: ResumeCallback() | %d", y);
+                break;
             }
             else if (y == 960) {
                 m_GameState = MENU;
                 LogMessage(0, "User quitted the play: ResumeCallback() | %d", y);
+                break;
             }
         }
     }
@@ -358,14 +363,15 @@ void CaptureThreadManager::SaveFrame() {
 }
 
 void CaptureThreadManager::UpdateGameState(unsigned int status) {
-        if (status == (unsigned int)GameState::PLAYING || status == (unsigned int)GameState::MENU) {
-            m_ShowReplay = false;
-            m_BlockLoop = false;
-            m_BlockLoopCV.notify_one();
-        }
+    if (status == (unsigned int)GameState::PLAYING || status == (unsigned int)GameState::MENU) {
+        m_ShowReplay = false;
+        m_BlockLoop = false;
+        m_BlockLoopCV.notify_one();
+    }
 
-		m_GameState = static_cast<GameState>(status); 
-		LogMessage(0, "Updated Game status: %d", status);
+    m_WaitDuration = 1.0 / 360;
+    m_GameState = static_cast<GameState>(status); 
+    LogMessage(0, "Updated Game status: %d", status);
 }
 
 uint8_t count = -1;
@@ -440,8 +446,6 @@ void CaptureThreadManager::DuplicationLoop() {
 	std::chrono::duration<double> sleepElapsed = std::chrono::duration<double>::zero();
 
     SetWindowPos(m_hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    
-    double waitDuration = 1.0 / 360;
 
     while (m_Run) {
         _FRAME_DATA data;
@@ -450,7 +454,7 @@ void CaptureThreadManager::DuplicationLoop() {
         std::chrono::duration<double> captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
 
 		std::chrono::time_point<std::chrono::high_resolution_clock> preSleep = std::chrono::high_resolution_clock::now();
-        while (captureElapsed.count() < waitDuration) {
+        while (captureElapsed.count() < m_WaitDuration) {
             captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
             //std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
@@ -477,20 +481,22 @@ void CaptureThreadManager::DuplicationLoop() {
             frameCount++;
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
-            if (m_GameState == PLAYING) {
-                std::unique_lock<std::mutex> lock(m_Mutex);
+            if (m_GameState == PLAYING && !m_ShowReplay) {
                 FrameData oldest = { nullptr, std::chrono::high_resolution_clock::now() };
                 if (!m_ReplayDeque.empty()) oldest = m_ReplayDeque.front();
                 if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) {
                     m_ReplayDeque.pop_front();
+
+                    if (!m_ReplayDeque.empty()) { // Checking twice for cases where the deque size is excessive
+                        oldest = m_ReplayDeque.front();
+                        if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) m_ReplayDeque.pop_front();
+                    }
                 }
 
-                if (!m_ShowReplay) {
-                    FrameData newFrame;
-                    newFrame.Frame = frameTexture;
-                    newFrame.Time = std::chrono::high_resolution_clock::now();
-                    m_ReplayDeque.push_back(std::move(newFrame));
-                }
+                FrameData newFrame;
+                newFrame.Frame = frameTexture;
+                newFrame.Time = std::chrono::high_resolution_clock::now();
+                m_ReplayDeque.push_back(std::move(newFrame));
             }
             lastCapture = std::chrono::high_resolution_clock::now();
             m_DuplicationManager.DoneWithFrame();
@@ -540,16 +546,16 @@ void CaptureThreadManager::DuplicationLoop() {
                 double currentFrameTime = elapsed.count() / frameCount;
                 double targetFrameTime = 1.0 / 360;
                 double adjustmentPerFrame = targetFrameTime - currentFrameTime;
-                //waitDuration = targetFrameTime + adjustmentPerFrame;
-				waitDuration += adjustmentPerFrame;
+                //m_WaitDuration = targetFrameTime + adjustmentPerFrame;
+				m_WaitDuration += adjustmentPerFrame;
 
 
                 // Although this kind of control is good enough, consider embedding the busy-wait within the main loop;
                 // I can always grab last DoneWithFrame() call then put a busy-wait loop until 1/360 seconds have passed.
-                if (waitDuration <= 0) waitDuration = 0;
+                if (m_WaitDuration <= 0) m_WaitDuration = 0;
                 /*
                 if (currentFrameTime < targetFrameTime * 0.9) {
-                    waitDuration *= 1.1;
+                    m_WaitDuration *= 1.1;
                 }
                 */
 
