@@ -106,7 +106,9 @@ void CaptureThreadManager::CreateQuad() {
 
 void CaptureThreadManager::Init(HWND hWnd) {
     m_hWnd = hWnd;
-    m_ReplayDeque.clear();
+
+    m_gameHWND = FindWindow(NULL, L"WJMAX.exe");
+    if (m_gameHWND == INVALID_HANDLE_VALUE) _CrtDbgBreak();
 
     UINT flag = 0;
     #ifdef _DEBUG
@@ -436,7 +438,8 @@ void CaptureThreadManager::DuplicationLoop() {
     std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
     std::chrono::time_point<std::chrono::high_resolution_clock> lastCapture = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> sleepElapsed = std::chrono::duration<double>::zero();
-    ShowWindow(m_hWnd, SW_MINIMIZE);
+
+    SetWindowPos(m_hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     
     double waitDuration = 1.0 / 360;
 
@@ -574,11 +577,9 @@ void CaptureThreadManager::playReplay() {
 		continue;
 	}
 
-    ShowWindow(m_hWnd, SW_RESTORE);
+    //ShowWindow(m_hWnd, SW_RESTORE);
+    SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
     
-    HWND nextHwnd = GetNextWindow(m_hWnd, GW_HWNDNEXT);
-    SetFocus(nextHwnd);
-
     float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
     std::unique_lock<std::mutex> lock(m_Mutex);
 
@@ -607,5 +608,8 @@ void CaptureThreadManager::playReplay() {
     }
 
     //SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-    ShowWindow(m_hWnd, SW_MINIMIZE);
+    //HWND nextHwnd = GetNextWindow(m_hWnd, GW_HWNDNEXT);
+	//ShowWindow(m_gameHWND, SW_SHOW);
+    SetWindowPos(m_gameHWND, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(m_hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }

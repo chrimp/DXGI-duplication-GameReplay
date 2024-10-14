@@ -50,7 +50,7 @@ class CaptureThreadManager {
     bool GetFrame(_Out_ std::vector<uint8_t>& data);
 	
 	private:
-	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true), m_hWnd(NULL) {};
+	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true), m_hWnd(NULL), m_gameHWND(NULL) {};
 	~CaptureThreadManager();
 
 	unsigned long m_FrameCount = 0;
@@ -79,6 +79,7 @@ class CaptureThreadManager {
 	ComPtr<ID3D11Buffer> m_VertexBuffer;
 
 	HWND m_hWnd;
+	HWND m_gameHWND;
 	void DuplicationLoop();
 	void CreateShader();
 	void CreateQuad();

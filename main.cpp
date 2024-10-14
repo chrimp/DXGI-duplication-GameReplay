@@ -73,8 +73,7 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
     RegisterClass(&wc);
 
     HWND hWnd = CreateWindowEx(
-        //WS_EX_LAYERED,
-        0,
+        WS_EX_NOACTIVATE, //WS_EX_LAYERED,
         wc.lpszClassName,
         L"DDAPI Frame Preview",
         WS_POPUP,
