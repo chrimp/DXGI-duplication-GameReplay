@@ -49,9 +49,8 @@ class CaptureThreadManager {
     _Success_(return)
     bool GetFrame(_Out_ std::vector<uint8_t>& data);
 	
-
 	private:
-	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true) {};
+	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true), m_hWnd(NULL) {};
 	~CaptureThreadManager();
 
 	unsigned long m_FrameCount = 0;

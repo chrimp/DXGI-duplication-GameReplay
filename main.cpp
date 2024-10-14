@@ -78,7 +78,7 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
         wc.lpszClassName,
         L"DDAPI Frame Preview",
         WS_POPUP,
-        1000, 0,
+        187, 0,
         692, 1440,
         NULL, NULL, hInstance, NULL);
     

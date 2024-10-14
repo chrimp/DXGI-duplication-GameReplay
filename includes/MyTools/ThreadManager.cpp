@@ -224,7 +224,6 @@ GameState CaptureThreadManager::PauseCallback() {
     // This will not be executed (returns) if the game is not in the PLAYING state
 
     if (m_GameState == PLAYING) {
-        m_BlockLoop = true; // This will prevent the loop capturing paused screen
         m_GameState = PAUSED;
         LogMessage(0, "Game paused");
     }
@@ -266,15 +265,21 @@ GameState CaptureThreadManager::ResumeCallback() {
         LogMessage(0, "Game is not paused");
         return m_GameState;
     }
-    // Loop is already blocked from PauseCallback()
+
+	std::unique_lock lockForStaging(m_Mutex);
+    m_BlockLoop = true;
     D3D11_MAPPED_SUBRESOURCE mappedResource;
-    m_DeviceContext->Map(m_StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    HRESULT hr = m_DeviceContext->Map(m_StagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
+    throwIfFailed(hr);
     uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
-    cv::Mat frame(1440, 2560, CV_8UC4, src);
+    cv::Mat frame(1440, 2560, CV_8UC4, src); // frame and mappedResource share the same memory
     cv::Mat image;
-    cv::cvtColor(frame, image, cv::COLOR_BGRA2GRAY);
+    cv::cvtColor(frame, image, cv::COLOR_BGRA2GRAY); // Now image is copied from frame, they don't share the same memory
     cv::threshold(image, image, 160, 255, cv::THRESH_BINARY);
     m_DeviceContext->Unmap(m_StagingTexture.Get(), 0);
+    m_BlockLoop = false;
+    m_BlockLoopCV.notify_one();
+	lockForStaging.unlock();
 
     bool selectionCheck = false;
     bool pause = true;
@@ -295,12 +300,7 @@ GameState CaptureThreadManager::ResumeCallback() {
                 // Set flag here for buffer exhuastion
                 if (!m_ShowReplay) {
                     m_ShowReplay = true;
-                    ShowWindow(m_hWnd, SW_RESTORE);
-					SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                     playReplay();
-                    m_ShowReplay = false;
-                    m_BlockLoop = false;
-                    m_BlockLoopCV.notify_one();
                 }
                 LogMessage(0, "Game resumed: ResumeCallback() | %d", y);
             }
@@ -356,14 +356,14 @@ void CaptureThreadManager::SaveFrame() {
 }
 
 void CaptureThreadManager::UpdateGameState(unsigned int status) {
-		m_GameState = static_cast<GameState>(status); 
-		LogMessage(0, "Updated Game status: %d", status);
-
         if (status == (unsigned int)GameState::PLAYING || status == (unsigned int)GameState::MENU) {
             m_ShowReplay = false;
             m_BlockLoop = false;
             m_BlockLoopCV.notify_one();
         }
+
+		m_GameState = static_cast<GameState>(status); 
+		LogMessage(0, "Updated Game status: %d", status);
 }
 
 uint8_t count = -1;
@@ -437,6 +437,9 @@ void CaptureThreadManager::DuplicationLoop() {
     std::chrono::time_point<std::chrono::high_resolution_clock> lastCapture = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> sleepElapsed = std::chrono::duration<double>::zero();
     ShowWindow(m_hWnd, SW_MINIMIZE);
+    
+    double waitDuration = 1.0 / 360;
+
     while (m_Run) {
         _FRAME_DATA data;
         bool timeout;
@@ -444,7 +447,7 @@ void CaptureThreadManager::DuplicationLoop() {
         std::chrono::duration<double> captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
 
 		std::chrono::time_point<std::chrono::high_resolution_clock> preSleep = std::chrono::high_resolution_clock::now();
-        while (captureElapsed.count() < 1.0 / 360) {
+        while (captureElapsed.count() < waitDuration) {
             captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
             //std::this_thread::sleep_for(std::chrono::milliseconds(1));
             continue;
@@ -460,6 +463,7 @@ void CaptureThreadManager::DuplicationLoop() {
 			m_BlockLoopCV.wait(lockForStaging, [this] { return !m_BlockLoop; });
 			if (m_BlockLoop) {
 				lockForStaging.unlock();
+                lastCapture = std::chrono::high_resolution_clock::now();
                 m_DuplicationManager.DoneWithFrame();
 				continue;
 			}
@@ -470,13 +474,8 @@ void CaptureThreadManager::DuplicationLoop() {
             frameCount++;
             std::chrono::time_point<std::chrono::high_resolution_clock> copyEnd = std::chrono::high_resolution_clock::now();
             copyElapsed += copyEnd - copyStart;
-            {
+            if (m_GameState == PLAYING) {
                 std::unique_lock<std::mutex> lock(m_Mutex);
-                if (m_ShowReplay && m_ReplayDeque.empty()) {
-                    m_ShowReplay = false;
-					ShowWindow(m_hWnd, SW_MINIMIZE);
-                }
-
                 FrameData oldest = { nullptr, std::chrono::high_resolution_clock::now() };
                 if (!m_ReplayDeque.empty()) oldest = m_ReplayDeque.front();
                 if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) {
@@ -485,19 +484,20 @@ void CaptureThreadManager::DuplicationLoop() {
 
                 if (!m_ShowReplay) {
                     FrameData newFrame;
-                    newFrame.Frame = std::move(frameTexture);
+                    newFrame.Frame = frameTexture;
                     newFrame.Time = std::chrono::high_resolution_clock::now();
-                    lastCapture = std::chrono::high_resolution_clock::now();
                     m_ReplayDeque.push_back(std::move(newFrame));
                 }
             }
+            lastCapture = std::chrono::high_resolution_clock::now();
             m_DuplicationManager.DoneWithFrame();
             m_CV.notify_one();
         }
         else if (timeout) {
-            if (!m_ShowReplay) {
+            if (!m_ShowReplay && m_GameState == PLAYING) {
                 FrameData oldest = { nullptr, std::chrono::high_resolution_clock::now() };
                 if (!m_ReplayDeque.empty()) oldest = m_ReplayDeque.front();
+                else continue;
                 if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) {
                     std::move(m_ReplayDeque.front());
                     m_ReplayDeque.pop_front();
@@ -510,7 +510,7 @@ void CaptureThreadManager::DuplicationLoop() {
                 m_DeviceContext->CopyResource(duplicatedTexture.Get(), lastTexture.Get());
 
                 FrameData newFrame;
-                newFrame.Frame = std::move(duplicatedTexture);
+                newFrame.Frame = duplicatedTexture;
                 newFrame.Time = nowTime;
                 //frameCount++;
                 m_ReplayDeque.push_back(std::move(newFrame));
@@ -534,11 +534,22 @@ void CaptureThreadManager::DuplicationLoop() {
                     std::cout << " ";
                 }
 
+                double currentFrameTime = elapsed.count() / frameCount;
+                double targetFrameTime = 1.0 / 360;
+                double adjustmentPerFrame = targetFrameTime - currentFrameTime;
+                //waitDuration = targetFrameTime + adjustmentPerFrame;
+				waitDuration += adjustmentPerFrame;
+                if (waitDuration < targetFrameTime * 0.9) {
+                    waitDuration = targetFrameTime * 0.9;
+                } else if (waitDuration > targetFrameTime * 1.1) {
+                    waitDuration = targetFrameTime * 1.1;
+                }
                 SetCursorPosition(0, GetConsoleHeight() - 1);
 				double sleepPerFrame = sleepElapsed.count() / frameCount;
-                printf("FPS: %d | Copy waits: %.4f | Deque size: %d | Game status: %s | Sleep: %.4f / frame", frameCount, copyElapsed.count(), m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str(), sleepPerFrame);
+                printf("FPS: %d | Sleep adjustment: %.6f | Deque size: %d | Game status: %s | Sleep: %.6f / frame", frameCount, adjustmentPerFrame, m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str(), sleepPerFrame);
                 fflush(stdout); // Ensure the output is immediately written to the console
                 SetCursorPosition(originalPos.X, originalPos.Y);
+
                 frameCount = 0;
 				sleepElapsed = std::chrono::duration<double>::zero();
                 copyElapsed = std::chrono::duration<double>::zero();
@@ -548,9 +559,28 @@ void CaptureThreadManager::DuplicationLoop() {
 }
 
 void CaptureThreadManager::playReplay() {
+    //SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+
+    double animWait = 0.588;
+	std::chrono::high_resolution_clock::time_point animWaitStart = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> animWaitDur(animWait);
+	while (std::chrono::high_resolution_clock::now() - animWaitStart < animWaitDur) {
+		continue;
+	}
+
+    ShowWindow(m_hWnd, SW_RESTORE);
+    
+    HWND nextHwnd = GetNextWindow(m_hWnd, GW_HWNDNEXT);
+    SetFocus(nextHwnd);
+
     float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
     std::unique_lock<std::mutex> lock(m_Mutex);
+
+	unsigned int replaySize = m_ReplayDeque.size();
+    double frameTime = 1 / (replaySize / 3.0);
+
     while (!m_ReplayDeque.empty()) {
+        std::chrono::time_point<std::chrono::high_resolution_clock> startTime = std::chrono::high_resolution_clock::now();
         ComPtr<ID3D11Texture2D> frame = std::move(m_ReplayDeque.front().Frame);
         m_DeviceContext->CopyResource(m_Texture.Get(), frame.Get());
         m_DeviceContext->ClearRenderTargetView(m_RenderTargetView.Get(), clearColor);
@@ -559,10 +589,17 @@ void CaptureThreadManager::playReplay() {
         m_DeviceContext->VSSetShader(m_VertexShader.Get(), nullptr, 0);
         m_DeviceContext->PSSetShader(m_PixelShader.Get(), nullptr, 0);
         m_DeviceContext->Draw(4, 0);
-        m_DeviceContext->Flush();
         HRESULT hr = m_swapChain->Present(1, 0);
         if (hr == DXGI_ERROR_WAS_STILL_DRAWING);
         else if (FAILED(hr)) { _CrtDbgBreak(); }
         m_ReplayDeque.pop_front();
+		std::chrono::duration<double> gap = std::chrono::high_resolution_clock::now() - startTime;
+        while (gap.count() < frameTime) {
+			gap = std::chrono::high_resolution_clock::now() - startTime;
+            continue;
+        }
     }
+
+    //SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    ShowWindow(m_hWnd, SW_MINIMIZE);
 }
