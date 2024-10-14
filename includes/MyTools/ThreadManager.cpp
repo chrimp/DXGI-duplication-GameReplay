@@ -539,11 +539,17 @@ void CaptureThreadManager::DuplicationLoop() {
                 double adjustmentPerFrame = targetFrameTime - currentFrameTime;
                 //waitDuration = targetFrameTime + adjustmentPerFrame;
 				waitDuration += adjustmentPerFrame;
-                if (waitDuration < targetFrameTime * 0.9) {
-                    waitDuration = targetFrameTime * 0.9;
-                } else if (waitDuration > targetFrameTime * 1.1) {
-                    waitDuration = targetFrameTime * 1.1;
+
+
+                // Although this kind of control is good enough, consider embedding the busy-wait within the main loop;
+                // I can always grab last DoneWithFrame() call then put a busy-wait loop until 1/360 seconds have passed.
+                if (waitDuration <= 0) waitDuration = 0;
+                /*
+                if (currentFrameTime < targetFrameTime * 0.9) {
+                    waitDuration *= 1.1;
                 }
+                */
+
                 SetCursorPosition(0, GetConsoleHeight() - 1);
 				double sleepPerFrame = sleepElapsed.count() / frameCount;
                 printf("FPS: %d | Sleep adjustment: %.6f | Deque size: %d | Game status: %s | Sleep: %.6f / frame", frameCount, adjustmentPerFrame, m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str(), sleepPerFrame);
