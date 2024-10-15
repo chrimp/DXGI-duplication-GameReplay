@@ -4,11 +4,12 @@
 #include "./includes/MyTools/ThreadManager.hpp"
 #include "./includes/MyTools/LogMessage.hpp"
 #include "./includes/MyTools/RawInputCapture.hpp"
-#include "./includes/MyTools/DirChanges.hpp"
+#include "./includes/MyTools/Procmon.hpp"
 
 #pragma comment(lib,"d3d11.lib")
 #pragma comment(lib,"dxgi.lib")
 #pragma comment(lib, "windowsapp.lib")
+#pragma comment(lib, "procmonsdk.lib")
 
 using namespace DirectX;
 
@@ -110,7 +111,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     RegisterRawInput(hWnd);
 
-    StartListenLoop();
+    //StartListenLoop();
+    ProcmonEvent procmon;
+    if (!procmon.StartMonitor()) _CrtDbgBreak();
     CaptureThreadManager::GetInstance().StartThread();
     MSG msg = {};
     while (WM_QUIT != msg.message) {
@@ -121,7 +124,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     }
 
 	CaptureThreadManager::GetInstance().StopThread();
-	StopListenLoop();
+    procmon.StopMonitor();
+	//StopListenLoop();
 
     if (pCout) fclose(pCout);
     if (pCerr) fclose(pCerr);
