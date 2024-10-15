@@ -452,7 +452,7 @@ void CaptureThreadManager::DuplicationLoop() {
         bool timeout;
         
         std::chrono::duration<double> captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
-
+        /*
 		std::chrono::time_point<std::chrono::high_resolution_clock> preSleep = std::chrono::high_resolution_clock::now();
         while (captureElapsed.count() < m_WaitDuration) {
             captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
@@ -460,6 +460,7 @@ void CaptureThreadManager::DuplicationLoop() {
             continue;
         }
 		sleepElapsed += std::chrono::high_resolution_clock::now() - preSleep;
+        */
 
         DUPL_RETURN ret = m_DuplicationManager.GetFrame(&data, &timeout);
         if (ret == DUPL_RETURN_SUCCESS && !timeout) {
@@ -498,6 +499,10 @@ void CaptureThreadManager::DuplicationLoop() {
                 newFrame.Time = std::chrono::high_resolution_clock::now();
                 m_ReplayDeque.push_back(std::move(newFrame));
             }
+            std::chrono::time_point<std::chrono::high_resolution_clock> preSleep = std::chrono::high_resolution_clock::now();
+			while (std::chrono::high_resolution_clock::now() - lastCapture < std::chrono::duration<double>(m_WaitDuration)) continue;
+            sleepElapsed += std::chrono::high_resolution_clock::now() - preSleep;
+
             lastCapture = std::chrono::high_resolution_clock::now();
             m_DuplicationManager.DoneWithFrame();
             m_CV.notify_one();
@@ -543,15 +548,17 @@ void CaptureThreadManager::DuplicationLoop() {
                     std::cout << " ";
                 }
 
+                double sleepPerFrame = sleepElapsed.count() / frameCount;
                 double currentFrameTime = elapsed.count() / frameCount;
                 double targetFrameTime = 1.0 / 360;
                 double adjustmentPerFrame = targetFrameTime - currentFrameTime;
-                //m_WaitDuration = targetFrameTime + adjustmentPerFrame;
-				m_WaitDuration += adjustmentPerFrame;
-
+                
+                if (currentFrameTime < targetFrameTime * 0.7 && m_WaitDuration == 0) {
+                    m_WaitDuration = 1.0 / 360;
+                }
 
                 // Although this kind of control is good enough, consider embedding the busy-wait within the main loop;
-                // I can always grab last DoneWithFrame() call then put a busy-wait loop until 1/360 seconds have passed.
+                // I can always grab last DoneWithFrame() call then put a busy-wait loop until 1/360 seconds have passed. <- Turned out that it stays -1 fps off the target
                 if (m_WaitDuration <= 0) m_WaitDuration = 0;
                 /*
                 if (currentFrameTime < targetFrameTime * 0.9) {
@@ -560,7 +567,6 @@ void CaptureThreadManager::DuplicationLoop() {
                 */
 
                 SetCursorPosition(0, GetConsoleHeight() - 1);
-				double sleepPerFrame = sleepElapsed.count() / frameCount;
                 printf("FPS: %d | Sleep adjustment: %.6f | Deque size: %d | Game status: %s | Sleep: %.6f / frame", frameCount, adjustmentPerFrame, m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str(), sleepPerFrame);
                 fflush(stdout); // Ensure the output is immediately written to the console
                 SetCursorPosition(originalPos.X, originalPos.Y);
