@@ -74,7 +74,7 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
     RegisterClass(&wc);
 
     HWND hWnd = CreateWindowEx(
-        WS_EX_NOACTIVATE, //WS_EX_LAYERED,
+        WS_EX_NOACTIVATE,
         wc.lpszClassName,
         L"DDAPI Frame Preview",
         WS_POPUP,
@@ -87,19 +87,6 @@ HWND CreateWindowInstance(HINSTANCE hInstance, int nCmdShow) {
 }
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
-    std::filesystem::path here = "./";
-    try {
-        for (const auto& entry: std::filesystem::directory_iterator(here)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
-                std::filesystem::remove(entry.path());
-            }
-        }
-    } catch (std::filesystem::filesystem_error& e) {
-        LogMessage(3, "Error: %s", e.what());
-    } catch (std::exception& e) {
-        LogMessage(3, "Error: %s", e.what());
-    }
-
     AllocConsole();
     FILE *pCout, *pCerr;
     freopen_s(&pCout, "CONOUT$", "w", stdout);
@@ -112,19 +99,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     RegisterRawInput(hWnd);
 
     //StartListenLoop();
-    ProcmonEvent procmon;
-    if (!procmon.StartMonitor()) _CrtDbgBreak();
+    if (!StartProcmon()) _CrtDbgBreak();
     CaptureThreadManager::GetInstance().StartThread();
     MSG msg = {};
     while (WM_QUIT != msg.message) {
-        if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+        if (GetMessage(&msg, nullptr, 0, 0)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
     }
 
 	CaptureThreadManager::GetInstance().StopThread();
-    procmon.StopMonitor();
+    StopProcmon();
 	//StopListenLoop();
 
     if (pCout) fclose(pCout);

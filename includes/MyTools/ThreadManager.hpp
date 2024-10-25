@@ -5,7 +5,6 @@
 #include <mutex>
 #include <atomic>
 #include <condition_variable>
-#include <queue>
 #include <chrono>
 #include <d3dcompiler.h>
 
@@ -39,15 +38,11 @@ class CaptureThreadManager {
 	void StartThread();
 	void StopThread();
 	void ToggleFPS() { m_FPSEnabled = !m_FPSEnabled; };
-	void SaveFrame();
 	void UpdateGameState(unsigned int status);
 	GameState PauseCallback();
 	GameState ResumeCallback();
 	bool QueueForCopy();
 	ComPtr<ID3D11Device> GetDevice() { return m_Device; }
-
-    _Success_(return)
-    bool GetFrame(_Out_ std::vector<uint8_t>& data);
 	
 	private:
 	CaptureThreadManager() : m_Run(false), m_FPSEnabled(true), m_hWnd(NULL), m_gameHWND(NULL) {};
@@ -62,7 +57,6 @@ class CaptureThreadManager {
 	std::deque<FrameData> m_ReplayDeque;
 	std::thread m_Thread, m_SaveThread;
 	std::mutex m_Mutex;
-	std::condition_variable m_CV;
 	std::condition_variable m_BlockLoopCV;
 	GameState m_GameState = MENU;
 	DUPLICATIONMANAGER m_DuplicationManager;

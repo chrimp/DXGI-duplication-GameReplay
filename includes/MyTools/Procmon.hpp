@@ -6,12 +6,13 @@
 
 #include "../includes/procmon/sdk/procmonsdk/sdk.hpp"
 #include "../includes/MyTools/ThreadManager.hpp"
+#include "../includes/MyTools/LogMessage.hpp"
 
 class ProcmonEvent: public IEventCallback {
     public:
+    ProcmonEvent();
+    ~ProcmonEvent() {}
     virtual BOOL DoEvent(const CRefPtr<CEventView> pEventView);
-    bool StartMonitor();
-    void StopMonitor();
 
     private:
     LONG m_PID = -1;
@@ -20,5 +21,8 @@ class ProcmonEvent: public IEventCallback {
 
     DWORD getPID();
 };
+
+bool StartProcmon();
+void StopProcmon();
 
 #endif // PROCMON_HPP

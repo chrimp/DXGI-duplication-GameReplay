@@ -130,7 +130,7 @@ void CaptureThreadManager::Init(HWND hWnd) {
         nullptr,
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
-        0,
+        flag,
         nullptr,
         0,
         D3D11_SDK_VERSION,
@@ -207,13 +207,11 @@ CaptureThreadManager::~CaptureThreadManager() {
 void CaptureThreadManager::StartThread() {
     m_Run = true;
     m_Thread = std::thread(&CaptureThreadManager::DuplicationLoop, this);
-    //m_SaveThread = std::thread(&CaptureThreadManager::SaveFrame, this);
 }
 
 void CaptureThreadManager::StopThread() {
     if (m_Run) {
         m_Run = false;
-        m_CV.notify_all();
         m_Thread.join();
         //m_SaveThread.join();
     }
@@ -237,32 +235,6 @@ int xcoords[8] = { 1040, 1100, 1160, 1190, 1260, 1330, 1365, 1470 };
 int ycoords[4] = { 540, 690, 830, 960 };
 
 GameState CaptureThreadManager::ResumeCallback() {
-    // This function will be called when Enter (VK_RETURN) is pressed
-    // This should check for these conditions:
-    // 1. The game is in the PAUSED state
-    // 2. m_StagingTexture should have a "PAUSED" text on the top. This includes:
-    // - Turn image into grayscale
-    // - Threshold the image at 170
-    // - Find white (255) pixels--Possible candidate coords are: Y is fixed at 270, X are: 1040, 1100, 1180, 1260, 1330, 1380, 1470
-    // - Recommend checking all points for white pixels
-    // 3-1. If they are not white, return PAUSED. This might implicate that the user is in the settings menu
-    // 3-2. If they are white, should check for the currently selected option
-    // - This also can be done by checking non-black pixels at:
-    // - X is fixed at 1600, Y are: 540 (Resume), 690 (Restart), 830 (Sound settings--ignore), 960 (Quit)
-    // 4. Return corresponding GameState. Only return PLAYING if the user is on the "Resume" option. Ignore 830, and the rest will return MENU
-    
-    // Needs to consider these corner cases:
-    // - Menu might not require speical handling, cause it will raise .mp4 access event, thus resetting the state to MENU.
-    // - However Restart might require special handling, cause it will raise .ogg access event, thus resetting the state to PLAYING.
-    // - In this case this thread will be mislead that the user has resumed the game from the menu, triggering the replay.
-    // - This can be mitigated by having:
-    // - A flag that indicates the user has pressed the restart button, and returning the MENU.
-    // - That flag should trigger buffer exhaustion, rendering the recorded frames.
-    // - After then the flag should be reset, refilling the buffer.
-    // - Or, making it render for only three seconds, then reset the flag.
-    // - By this way I don't have to make a separate flag for exhaustion, and buffer will be still filled.
-    // - However this will include recursive recording (recording the replay), which is not a big deal, but not ideal anyways.
-
     if (m_GameState != PAUSED) {
         LogMessage(0, "Game is not paused");
         return m_GameState;
@@ -319,7 +291,7 @@ GameState CaptureThreadManager::ResumeCallback() {
                 break;
             }
             else if (y == 960) {
-                m_GameState = MENU;
+                UpdateGameState((unsigned int)GameState::MENU);
                 LogMessage(0, "User quitted the play: ResumeCallback() | %d", y);
                 break;
             }
@@ -330,83 +302,20 @@ clean:
     // Should implement esc to resume in future
 }
 
-void CaptureThreadManager::SaveFrame() {
-    std::chrono::time_point<std::chrono::high_resolution_clock> lastTime = std::chrono::high_resolution_clock::now();
-	std::chrono::time_point<std::chrono::high_resolution_clock> saveTime = std::chrono::high_resolution_clock::now();
-    while (m_Run) {
-        std::chrono::time_point<std::chrono::high_resolution_clock> nowTime = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double> elapsed = nowTime - lastTime;
-        std::vector<uint8_t> frameData;
-
-        //if (elapsed.count() < 1.0/360) continue;
-        //if (!GetFrame(frameData)) {
-        //    //LogMessage(2, "Failed to get frame");
-        //    continue;
-        //}
-        lastTime = nowTime;
-
-        cv::Mat frame(1440, 2560, CV_8UC4, frameData.data());
-        cv::Mat image;
-        cv::cvtColor(frame, image, cv::COLOR_BGRA2BGR);
-
-        std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        std::tm localTime;
-        localtime_s(&localTime, &now);
-        std::string time = std::to_string(localTime.tm_mday) + std::to_string(localTime.tm_hour) + std::to_string(localTime.tm_min) + std::to_string(localTime.tm_sec);
-        
-        if (nowTime - saveTime > std::chrono::seconds(30)) {
-            cv::imwrite(time + ".jpg", image);
-            saveTime = nowTime;
-        }
-        //std::cout << "Image written" << std::endl;
-    }
-}
-
 void CaptureThreadManager::UpdateGameState(unsigned int status) {
-    if (status == (unsigned int)GameState::PLAYING || status == (unsigned int)GameState::MENU) {
-        m_ShowReplay = false;
-        m_BlockLoop = false;
-        m_BlockLoopCV.notify_one();
+    if (m_GameState == (GameState)status) return;
+
+    if (status == (unsigned int)GameState::MENU) {
+        m_BlockLoop = true;
+        m_ReplayDeque.clear();
+		m_BlockLoop = false;
+		m_BlockLoopCV.notify_one();
     }
 
     m_WaitDuration = 1.0 / 360;
     m_GameState = static_cast<GameState>(status); 
     LogMessage(0, "Updated Game status: %d", status);
 }
-
-uint8_t count = -1;
-/*
-_Success_(return)
-bool CaptureThreadManager::GetFrame(_Out_ std::vector<uint8_t>& data) {
-    std::unique_lock<std::mutex> lock(m_Mutex);
-    m_CV.wait(lock, [this] { return !m_FrameQueue.empty(); });
-    if (!m_FrameQueue.empty()) {
-        count++;
-        D3D11_MAPPED_SUBRESOURCE mappedResource;
-        D3D11_TEXTURE2D_DESC desc;
-        ComPtr<ID3D11Texture2D> stagingTexture = std::move(m_FrameQueue.front());
-        m_FrameQueue.pop();
-        stagingTexture->GetDesc(&desc);
-        
-        HRESULT hr = m_DeviceContext->Map(stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mappedResource);
-        if (FAILED(hr)) {
-            LogMessage(3, "Failed to Map: 0x%x", hr);
-            abort();
-        }
-        uint8_t* src = static_cast<uint8_t*>(mappedResource.pData);
-        std::vector<uint8_t> frameBuffer(desc.Width * desc.Height * 4);
-
-        for (UINT y = 0; y < desc.Height; y++) {
-            memcpy(&frameBuffer[y * desc.Width * 4], src + y * mappedResource.RowPitch, desc.Width * 4);
-        }
-
-        data = frameBuffer;
-        m_DeviceContext->Unmap(stagingTexture.Get(), 0);
-        return true;
-    }
-    return false;
-}
-*/
 
 void SetCursorPosition(int x, int y) {
     COORD coord;
@@ -429,7 +338,7 @@ void CaptureThreadManager::DuplicationLoop() {
 	texDesc.Height = 1440;
 	texDesc.MipLevels = 1;
 	texDesc.ArraySize = 1;
-	texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;    
+	texDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
 	texDesc.SampleDesc.Count = 1;
     texDesc.SampleDesc.Quality = 0;
 	texDesc.Usage = D3D11_USAGE_DEFAULT;
@@ -448,25 +357,14 @@ void CaptureThreadManager::DuplicationLoop() {
     SetWindowPos(m_hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
     while (m_Run) {
-        _FRAME_DATA data;
-        bool timeout;
-        
-        std::chrono::duration<double> captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
-        /*
-		std::chrono::time_point<std::chrono::high_resolution_clock> preSleep = std::chrono::high_resolution_clock::now();
-        while (captureElapsed.count() < m_WaitDuration) {
-            captureElapsed = std::chrono::high_resolution_clock::now() - lastCapture;
-            //std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
-        }
-		sleepElapsed += std::chrono::high_resolution_clock::now() - preSleep;
-        */
+        _FRAME_DATA data; bool timeout;
 
         DUPL_RETURN ret = m_DuplicationManager.GetFrame(&data, &timeout);
         if (ret == DUPL_RETURN_SUCCESS && !timeout) {
             ComPtr<ID3D11Texture2D> frameTexture;
 			m_Device->CreateTexture2D(&texDesc, nullptr, frameTexture.GetAddressOf());
             std::chrono::time_point<std::chrono::high_resolution_clock> copyStart = std::chrono::high_resolution_clock::now();
+            
             std::unique_lock lockForStaging(m_Mutex);
 			m_BlockLoopCV.wait(lockForStaging, [this] { return !m_BlockLoop; });
 			if (m_BlockLoop) {
@@ -475,6 +373,7 @@ void CaptureThreadManager::DuplicationLoop() {
                 m_DuplicationManager.DoneWithFrame();
 				continue;
 			}
+
             m_DeviceContext->CopyResource(m_StagingTexture.Get(), data.Frame);
             m_DeviceContext->CopySubresourceRegion(frameTexture.Get(), 0, 0, 0, 0, data.Frame, 0, &box);
             if (frameTexture.Get() == NULL) _CrtDbgBreak();
@@ -488,30 +387,30 @@ void CaptureThreadManager::DuplicationLoop() {
                 if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) {
                     m_ReplayDeque.pop_front();
 
-                    if (!m_ReplayDeque.empty()) { // Checking twice for cases where the deque size is excessive
+                    // Checking twice for cases where the deque size is excessive
+                    // Popping once is not enough since new frame is being added soon (size will not be changed then)
+                    if (!m_ReplayDeque.empty()) {
                         oldest = m_ReplayDeque.front();
                         if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) m_ReplayDeque.pop_front();
                     }
                 }
 
-                FrameData newFrame;
-                newFrame.Frame = frameTexture;
-                newFrame.Time = std::chrono::high_resolution_clock::now();
+                FrameData newFrame = { frameTexture, std::chrono::high_resolution_clock::now() }; // .Frame, .Time
                 m_ReplayDeque.push_back(std::move(newFrame));
             }
+
             std::chrono::time_point<std::chrono::high_resolution_clock> preSleep = std::chrono::high_resolution_clock::now();
 			while (std::chrono::high_resolution_clock::now() - lastCapture < std::chrono::duration<double>(m_WaitDuration)) continue;
             sleepElapsed += std::chrono::high_resolution_clock::now() - preSleep;
 
             lastCapture = std::chrono::high_resolution_clock::now();
             m_DuplicationManager.DoneWithFrame();
-            m_CV.notify_one();
         }
         else if (timeout) {
             if (!m_ShowReplay && m_GameState == PLAYING) {
                 FrameData oldest = { nullptr, std::chrono::high_resolution_clock::now() };
-                if (!m_ReplayDeque.empty()) oldest = m_ReplayDeque.front();
-                else continue;
+                if (!m_ReplayDeque.empty()) oldest = m_ReplayDeque.front(); else continue;
+
                 if (std::chrono::high_resolution_clock::now() - oldest.Time > std::chrono::seconds(3)) {
                     std::move(m_ReplayDeque.front());
                     m_ReplayDeque.pop_front();
@@ -560,11 +459,6 @@ void CaptureThreadManager::DuplicationLoop() {
                 // Although this kind of control is good enough, consider embedding the busy-wait within the main loop;
                 // I can always grab last DoneWithFrame() call then put a busy-wait loop until 1/360 seconds have passed. <- Turned out that it stays -1 fps off the target
                 if (m_WaitDuration <= 0) m_WaitDuration = 0;
-                /*
-                if (currentFrameTime < targetFrameTime * 0.9) {
-                    m_WaitDuration *= 1.1;
-                }
-                */
 
                 SetCursorPosition(0, GetConsoleHeight() - 1);
                 printf("FPS: %d | Sleep adjustment: %.6f | Deque size: %d | Game status: %s | Sleep: %.6f / frame", frameCount, adjustmentPerFrame, m_ReplayDeque.size(), GetGameStatusStr(m_GameState).c_str(), sleepPerFrame);
@@ -580,16 +474,16 @@ void CaptureThreadManager::DuplicationLoop() {
 }
 
 void CaptureThreadManager::playReplay() {
-    //SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-
-    double animWait = 0.588;
+    // The Wait duration is not exact. According to high-speed recording it's more like 0.588* seconds, however still indeterministic.
+    // Also due to some overhead even with busy-wait animation itself ends just a bit short.
+    // Anyway I cannot conclude what is the exact duration without decompiling the original game.
+    double animWait = 0.58;
 	std::chrono::high_resolution_clock::time_point animWaitStart = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> animWaitDur(animWait);
 	while (std::chrono::high_resolution_clock::now() - animWaitStart < animWaitDur) {
 		continue;
 	}
 
-    //ShowWindow(m_hWnd, SW_RESTORE);
     SetWindowPos(m_hWnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
     
     float clearColor[] = { 0.0f, 0.0f, 0.0f, 1.0f };
@@ -619,9 +513,6 @@ void CaptureThreadManager::playReplay() {
         }
     }
 
-    //SetWindowPos(m_hWnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-    //HWND nextHwnd = GetNextWindow(m_hWnd, GW_HWNDNEXT);
-	//ShowWindow(m_gameHWND, SW_SHOW);
-    SetWindowPos(m_gameHWND, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(m_gameHWND, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Tries to move the game window to the top--Does it really matter?
     SetWindowPos(m_hWnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }

@@ -63,10 +63,10 @@ void ProcessRawInput(LPARAM lParam) {
                 } else if (rawKB.VKey == VK_ESCAPE) {
                     CaptureThreadManager::GetInstance().PauseCallback();
                 }
-                //LogMessage(0, "Key down: %d", rawKB.VKey);
+                LogMessage(0, "Key down: %d", rawKB.VKey);
                 break;
             case WM_KEYUP:
-                //LogMessage(0, "Key up: %d", rawKB.VKey);
+                LogMessage(0, "Key up: %d", rawKB.VKey);
                 break;
         }
     }
