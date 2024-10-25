@@ -8,6 +8,8 @@
 #include "../includes/MyTools/ThreadManager.hpp"
 #include "../includes/MyTools/LogMessage.hpp"
 
+#pragma comment(lib, "procmonsdk.lib")
+
 class ProcmonEvent: public IEventCallback {
     public:
     ProcmonEvent();

@@ -8,11 +8,16 @@
 #include <chrono>
 #include <d3dcompiler.h>
 
-#pragma comment(lib, "D3DCompiler.lib")
-
 #include "../DuplicationSamples/DuplicationManager.h"
 #include "LogMessage.hpp"
 #include "opencv2/opencv.hpp"
+
+#pragma comment(lib, "D3DCompiler.lib")
+#ifdef _DEBUG
+#pragma comment(lib, "opencv_world4100d.lib")
+#else
+#pragma comment(lib, "opencv_world4100.lib")
+#endif
 
 enum GameState {
 	MENU,
