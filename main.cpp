@@ -98,7 +98,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
 
     RegisterRawInput(hWnd);
 
-    //StartListenLoop();
+    //StartListenLoop(); // Not in use -- this uses ReadDirectoryChangesW
     if (!StartProcmon()) _CrtDbgBreak();
     CaptureThreadManager::GetInstance().StartThread();
     MSG msg = {};
